@@ -294,6 +294,12 @@ pub enum AstError {
     UnexpectedToken(LexicalTokenContext, u32), // Added u32 to provide caller context
     #[error("Expected operator")]
     ExpectedOperator(LexicalTokenContext),
+    #[error("Unmatched parentheses")]
+    UnmatchedParentheses,
+    #[error("Unmatched brackets")]
+    UnmatchedBrackets,
+    #[error("Unmatched braces")]
+    UnmatchedBraces,
     #[error("Unexpected end of file")]
     UnexpectedEndOfFile,
 }
@@ -324,7 +330,10 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
         match op {
             Operator::ParenthesisLeft => {
                 let lhs = expr_bp(lexer, 0)?;
-                assert_eq!(lexer.next().map(|t| t.get_token()), Some(&LexicalToken::ParenthesisRight));
+                if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::ParenthesisRight) {
+                    return Err(AstError::UnmatchedParentheses);
+                }
+
                 lhs
             },
             _ => {
@@ -362,7 +371,10 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
             lhs =  if current_token.get_token() == &LexicalToken::BracketLeft {
                 lexer.next(); // Consume the operator
                 let rhs = expr_bp(lexer, 0)?;
-                assert_eq!(lexer.next().map(|t| t.get_token()), Some(&LexicalToken::BracketRight));
+                if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BracketRight) {
+                    return Err(AstError::UnmatchedBrackets);
+                }
+                
                 AstNode::Expression {
                     head: Box::new(op),
                     args: vec![Box::new(lhs), Box::new(rhs)],

@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::debug_println;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum LexicalToken {
     Integer(u64),
@@ -219,7 +221,7 @@ pub fn tokenize(input: &str) -> Result<Vec<LexicalTokenContext>, LexicalTokenize
     let mut line_num = 1;
     for c in chars {
         char_pos += 1;
-        println!("Char: '{}', TokenType: {:?}, Buffer: '{}'", c, token_type, buffer);
+        debug_println!("Char: '{}', TokenType: {:?}, Buffer: '{}'", c, token_type, buffer);
         match c {
             c if c >= '0' && c <= '1' => {
                 if escaped {
