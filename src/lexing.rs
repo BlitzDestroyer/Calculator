@@ -18,11 +18,12 @@ pub enum LexicalToken {
     BracketRight,
     BraceLeft,
     BraceRight,
-    Percent,
+    PercentSign,
     Caret,
     Ampersand,
     ExclamationMark,
     Pipe,
+    Tilde,
     EqualSign,
     GreaterThanSign,
     LessThanSign,
@@ -60,11 +61,12 @@ impl LexicalToken {
             LexicalToken::BracketRight => Some("]"),
             LexicalToken::BraceLeft => Some("{"),
             LexicalToken::BraceRight => Some("}"),
-            LexicalToken::Percent => Some("%"),
+            LexicalToken::PercentSign => Some("%"),
             LexicalToken::Caret => Some("^"),
             LexicalToken::Ampersand => Some("&"),
             LexicalToken::ExclamationMark => Some("!"),
             LexicalToken::Pipe => Some("|"),
+            LexicalToken::Tilde => Some("~"),
             LexicalToken::EqualSign => Some("="),
             LexicalToken::GreaterThanSign => Some(">"),
             LexicalToken::LessThanSign => Some("<"),
@@ -89,27 +91,15 @@ impl LexicalToken {
 }
 
 #[derive(Debug, Clone)]
-pub struct LexicalTokenContext {
-    token: LexicalToken,
+pub struct Context {
     token_literal: String, // How the token appears in the source code
     line: usize,
     column: usize,
 }
 
-impl LexicalTokenContext {
-    pub fn new(token: LexicalToken, token_literal: String, line: usize, column: usize) -> Self {
-        Self { token, token_literal, line, column }
-    }
-
-    pub fn new_static(token: LexicalToken, line: usize, column: usize) -> Self {
-        let token_literal = token.get_static_literal();
-        assert_ne!(token_literal, None);
-        let token_literal = token_literal.unwrap().to_string();
-        Self { token, token_literal, line, column }
-    }
-
-    pub fn get_token(&self) -> &LexicalToken {
-        &self.token
+impl Context {
+    pub fn new(token_literal: String, line: usize, column: usize) -> Self {
+        Self { token_literal, line, column }
     }
 
     pub fn get_token_literal(&self) -> &str {
@@ -126,6 +116,33 @@ impl LexicalTokenContext {
 
     pub fn get_position(&self) -> (usize, usize) {
         (self.line, self.column)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LexicalTokenContext {
+    token: LexicalToken,
+    context: Context,
+}
+
+impl LexicalTokenContext {
+    pub fn new(token: LexicalToken, token_literal: String, line: usize, column: usize) -> Self {
+        Self { token, context: Context::new(token_literal, line, column) }
+    }
+
+    pub fn new_static(token: LexicalToken, line: usize, column: usize) -> Self {
+        let token_literal = token.get_static_literal();
+        assert_ne!(token_literal, None);
+        let token_literal = token_literal.unwrap().to_string();
+        Self { token, context: Context::new(token_literal, line, column) }
+    }
+
+    pub fn get_token(&self) -> &LexicalToken {
+        &self.token
+    }
+
+    pub fn get_context(&self) -> &Context {
+        &self.context
     }
 }
 
@@ -347,7 +364,7 @@ pub fn tokenize(input: &str) -> Result<Vec<LexicalTokenContext>, LexicalTokenize
                 lex_simple_token(LexicalToken::BraceRight, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
             }
             '%' => {
-                lex_simple_token(LexicalToken::Percent, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
+                lex_simple_token(LexicalToken::PercentSign, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
             }
             '^' => {
                 lex_simple_token(LexicalToken::Caret, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
@@ -355,8 +372,14 @@ pub fn tokenize(input: &str) -> Result<Vec<LexicalTokenContext>, LexicalTokenize
             '&' => {
                 lex_simple_token(LexicalToken::Ampersand, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
             }
+            '|' => {
+                lex_simple_token(LexicalToken::Pipe, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
+            }
             '!' => {
                 lex_simple_token(LexicalToken::ExclamationMark, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
+            }
+            '~' => {
+                lex_simple_token(LexicalToken::Tilde, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
             }
             ';' => {
                 lex_simple_token(LexicalToken::Semicolon, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;

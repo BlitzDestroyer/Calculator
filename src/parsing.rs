@@ -101,6 +101,7 @@ impl Atom {
             LexicalToken::Minus => Some(Operator::Minus),
             LexicalToken::Asterisk => Some(Operator::Multiply),
             LexicalToken::SlashForward => Some(Operator::Divide),
+            LexicalToken::PercentSign => Some(Operator::Modulo),
             LexicalToken::LessThanSign => Some(Operator::LessThan),
             LexicalToken::LessThanEqualSign => Some(Operator::LessThanOrEqual),
             LexicalToken::GreaterThanSign => Some(Operator::GreaterThan),
@@ -110,9 +111,10 @@ impl Atom {
             LexicalToken::Ampersand => Some(Operator::BitwiseAnd),
             LexicalToken::Pipe => Some(Operator::BitwiseOr),
             LexicalToken::Caret => Some(Operator::BitwiseXor),
+            LexicalToken::Tilde => Some(Operator::BitwiseNot),
             LexicalToken::LessThanLessThanSign => Some(Operator::LeftShift),
             LexicalToken::GreaterThanGreaterThanSign => Some(Operator::RightShift),
-            LexicalToken::ExclamationMark => Some(Operator::ExclamationMark),
+            LexicalToken::ExclamationMark => Some(Operator::Not),
             LexicalToken::ParenthesisLeft => Some(Operator::ParenthesisLeft),
             LexicalToken::ParenthesisRight => Some(Operator::ParenthesisRight),
             LexicalToken::BracketLeft => Some(Operator::BracketLeft),
@@ -184,12 +186,30 @@ impl std::fmt::Display for Atom {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Integer(u64),
     Float(f64),
     String(String),
     Bool(bool)
+}
+
+impl Value {
+    pub fn integer(value: u64) -> Self {
+        Value::Integer(value)
+    }
+
+    pub fn float(value: f64) -> Self {
+        Value::Float(value)
+    }
+
+    pub fn string(value: String) -> Self {
+        Value::String(value)
+    }
+
+    pub fn boolean(value: bool) -> Self {
+        Value::Bool(value)
+    }
 }
 
 impl std::fmt::Display for Value {
@@ -203,7 +223,7 @@ impl std::fmt::Display for Value {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
     Plus,
     Minus,
@@ -218,13 +238,13 @@ pub enum Operator {
     NotEqual,
     And,
     Or,
-    ExclamationMark,
+    Not,
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
     LeftShift,
     RightShift,
-    Negate,
+    BitwiseNot,
     ParenthesisLeft,
     ParenthesisRight,
     BracketLeft,
@@ -249,13 +269,13 @@ impl std::fmt::Display for Operator {
             Operator::NotEqual => write!(f, "!="),
             Operator::And => write!(f, "&&"),
             Operator::Or => write!(f, "||"),
-            Operator::ExclamationMark => write!(f, "!"),
+            Operator::Not => write!(f, "!"),
             Operator::BitwiseAnd => write!(f, "&"),
             Operator::BitwiseOr => write!(f, "|"),
             Operator::BitwiseXor => write!(f, "^"),
             Operator::LeftShift => write!(f, "<<"),
             Operator::RightShift => write!(f, ">>"),
-            Operator::Negate => write!(f, "~"),
+            Operator::BitwiseNot => write!(f, "~"),
             Operator::ParenthesisLeft => write!(f, "("),
             Operator::ParenthesisRight => write!(f, ")"),
             Operator::BracketLeft => write!(f, "["),
@@ -386,7 +406,7 @@ fn prefix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Re
     match op.get_atom() {
         Some(Atom::Operator(operator)) => match operator {
             Operator::Plus | Operator::Minus => Ok(((), 17)),
-            Operator::Negate | Operator::ExclamationMark => Ok(((), 17)),
+            Operator::BitwiseNot | Operator::Not => Ok(((), 17)),
             _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
         },
         _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
