@@ -23,8 +23,10 @@ pub enum LexicalToken {
     PercentSign,
     Caret,
     Ampersand,
+    AmpersandAmpersand,
     ExclamationMark,
     Pipe,
+    PipePipe,
     Tilde,
     EqualSign,
     GreaterThanSign,
@@ -45,6 +47,8 @@ pub enum LexicalToken {
     While,
     For,
     Loop,
+    Break,
+    Continue,
 }
 
 impl LexicalToken {
@@ -66,8 +70,10 @@ impl LexicalToken {
             LexicalToken::PercentSign => Some("%"),
             LexicalToken::Caret => Some("^"),
             LexicalToken::Ampersand => Some("&"),
+            LexicalToken::AmpersandAmpersand => Some("&&"),
             LexicalToken::ExclamationMark => Some("!"),
             LexicalToken::Pipe => Some("|"),
+            LexicalToken::PipePipe => Some("||"),
             LexicalToken::Tilde => Some("~"),
             LexicalToken::EqualSign => Some("="),
             LexicalToken::GreaterThanSign => Some(">"),
@@ -88,6 +94,8 @@ impl LexicalToken {
             LexicalToken::While => Some("while"),
             LexicalToken::For => Some("for"),
             LexicalToken::Loop => Some("loop"),
+            LexicalToken::Break => Some("break"),
+            LexicalToken::Continue => Some("continue"),
         }
     }
 }
@@ -372,10 +380,56 @@ pub fn tokenize(input: &str) -> Result<Vec<LexicalTokenContext>, LexicalTokenize
                 lex_simple_token(LexicalToken::Caret, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
             }
             '&' => {
-                lex_simple_token(LexicalToken::Ampersand, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
+                if escaped {
+                    return Err(LexicalTokenizeError::UnknownEscapeSequence(c, (line_num, char_pos), line!()));
+                }
+
+                parse_buffer(&mut buffer, token_type, &mut tokens, line_num, char_pos)?;
+                let prev_token = tokens.last();
+                let (token, must_pop) = if let Some(prev_token) = prev_token {
+                    match prev_token.token {
+                        LexicalToken::Ampersand => (LexicalToken::AmpersandAmpersand, true),
+                        _ => (LexicalToken::Ampersand, false),
+                    }
+                }
+                else{
+                    (LexicalToken::Ampersand, false)
+                };
+
+                // If need to remove prev token to form new double token
+                if must_pop {
+                    tokens.pop();
+                }
+
+                let token = LexicalTokenContext::new_static(token, line_num, char_pos - buffer.len());
+                tokens.push(token);
+                token_type = LexicalTokenType::None;
             }
             '|' => {
-                lex_simple_token(LexicalToken::Pipe, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
+                if escaped {
+                    return Err(LexicalTokenizeError::UnknownEscapeSequence(c, (line_num, char_pos), line!()));
+                }
+
+                parse_buffer(&mut buffer, token_type, &mut tokens, line_num, char_pos)?;
+                let prev_token = tokens.last();
+                let (token, must_pop) = if let Some(prev_token) = prev_token {
+                    match prev_token.token {
+                        LexicalToken::Pipe => (LexicalToken::PipePipe, true),
+                        _ => (LexicalToken::Pipe, false),
+                    }
+                }
+                else{
+                    (LexicalToken::Pipe, false)
+                };
+
+                // If need to remove prev token to form new double token
+                if must_pop {
+                    tokens.pop();
+                }
+
+                let token = LexicalTokenContext::new_static(token, line_num, char_pos - buffer.len());
+                tokens.push(token);
+                token_type = LexicalTokenType::None;
             }
             '!' => {
                 lex_simple_token(LexicalToken::ExclamationMark, &mut buffer, &mut token_type, &mut tokens, escaped, c, line_num, char_pos, line!())?;
@@ -599,6 +653,8 @@ fn parse_buffer(buffer: &mut String, token_type: LexicalTokenType, tokens: &mut 
                     "while" => LexicalToken::While,
                     "for" => LexicalToken::For,
                     "loop" => LexicalToken::Loop,
+                    "break" => LexicalToken::Break,
+                    "continue" => LexicalToken::Continue,
                     _ => LexicalToken::Identifier(buffer.clone()),
                 };
                 let token_literal = buffer.clone();
@@ -871,6 +927,38 @@ mod lexical_test {
             LexicalToken::Asterisk,
             LexicalToken::Float(9.1011),
         ];
+        assert_eq!(tokens.len(), expected.len());
+        for (i, token) in tokens.iter().enumerate() {
+            assert_eq!(&token.token, &expected[i]);
+        }
+    }
+
+    #[test]
+    fn test_conditional() {
+        let input = "if x == 0 { 1 } else if x == 1 { 2 } else { 3 }";
+        let tokens = tokenize(input).unwrap();
+        let expected = vec![
+            LexicalToken::If,
+            LexicalToken::Identifier("x".to_string()),
+            LexicalToken::EqualEqualSign,
+            LexicalToken::Integer(0),
+            LexicalToken::BraceLeft,
+            LexicalToken::Integer(1),
+            LexicalToken::BraceRight,
+            LexicalToken::Else,
+            LexicalToken::If,
+            LexicalToken::Identifier("x".to_string()),
+            LexicalToken::EqualEqualSign,
+            LexicalToken::Integer(1),
+            LexicalToken::BraceLeft,
+            LexicalToken::Integer(2),
+            LexicalToken::BraceRight,
+            LexicalToken::Else,
+            LexicalToken::BraceLeft,
+            LexicalToken::Integer(3),
+            LexicalToken::BraceRight,
+        ];
+
         assert_eq!(tokens.len(), expected.len());
         for (i, token) in tokens.iter().enumerate() {
             assert_eq!(&token.token, &expected[i]);

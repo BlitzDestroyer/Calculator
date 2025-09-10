@@ -14,6 +14,8 @@ pub enum ComputationError {
     IncompatibleTypes,
     #[error("AstError: {0}")]
     AstError(#[from] AstError),
+    #[error("Expected boolean value")]
+    ExpectedBooleanValue,
     #[error("Not implemented")]
     NotImplemented,
 }
@@ -59,7 +61,26 @@ fn get_ast_node_value(node: &AstNode) -> Result<Value, ComputationError> {
             let op = get_ast_node_operator(head)?;
             compute_operation(op, args)
         }
+        AstNode::Condition { test, consequent, alternate } => compute_condition(test, consequent, alternate),
         _ => Err(ComputationError::NotImplemented),
+    }
+}
+
+fn compute_condition(condition: &AstNode, consequent: &AstNode, alternate: &Option<Box<AstNode>>) -> Result<Value, ComputationError> {
+    let value = get_ast_node_value(condition)?;
+    let bool = match value {
+        Value::Boolean(b) => b,
+        _ => return Err(ComputationError::ExpectedBooleanValue),
+    };
+
+    if bool {
+        get_ast_node_value(consequent)
+    }
+    else if let Some(alternate) = alternate {
+        get_ast_node_value(alternate)
+    }
+    else {
+        Ok(Value::Unit)
     }
 }
 
@@ -164,15 +185,144 @@ fn compute_operation(op: Operator, args: Vec<Value>) -> Result<Value, Computatio
                 Err(ComputationError::IncorrectNumberOfArguments)
             }
         },
-        // Operator::LessThan => todo!(),
-        // Operator::LessThanOrEqual => todo!(),
-        // Operator::GreaterThan => todo!(),
-        // Operator::GreaterThanOrEqual => todo!(),
-        // Operator::Equal => todo!(),
-        // Operator::NotEqual => todo!(),
-        // Operator::And => todo!(),
-        // Operator::Or => todo!(),
-        // Operator::ExclamationMark => todo!(),
+        Operator::LessThan => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Integer(l), Value::Integer(r)) => Ok(Value::Boolean(l < r)),
+                    (Value::Float(l), Value::Float(r)) => Ok(Value::Boolean(l < r)),
+                    (Value::Integer(l), Value::Float(r)) => Ok(Value::Boolean((*l as f64) < *r)),
+                    (Value::Float(l), Value::Integer(r)) => Ok(Value::Boolean(*l < (*r as f64))),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::LessThanOrEqual => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Integer(l), Value::Integer(r)) => Ok(Value::Boolean(l <= r)),
+                    (Value::Float(l), Value::Float(r)) => Ok(Value::Boolean(l <= r)),
+                    (Value::Integer(l), Value::Float(r)) => Ok(Value::Boolean((*l as f64) <= *r)),
+                    (Value::Float(l), Value::Integer(r)) => Ok(Value::Boolean(*l <= (*r as f64))),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::GreaterThan => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Integer(l), Value::Integer(r)) => Ok(Value::Boolean(l > r)),
+                    (Value::Float(l), Value::Float(r)) => Ok(Value::Boolean(l > r)),
+                    (Value::Integer(l), Value::Float(r)) => Ok(Value::Boolean((*l as f64) > *r)),
+                    (Value::Float(l), Value::Integer(r)) => Ok(Value::Boolean(*l > (*r as f64))),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::GreaterThanOrEqual => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Integer(l), Value::Integer(r)) => Ok(Value::Boolean(l >= r)),
+                    (Value::Float(l), Value::Float(r)) => Ok(Value::Boolean(l >= r)),
+                    (Value::Integer(l), Value::Float(r)) => Ok(Value::Boolean((*l as f64) >= *r)),
+                    (Value::Float(l), Value::Integer(r)) => Ok(Value::Boolean(*l >= (*r as f64))),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::Equal => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Integer(l), Value::Integer(r)) => Ok(Value::Boolean(l == r)),
+                    (Value::Float(l), Value::Float(r)) => Ok(Value::Boolean(l == r)),
+                    (Value::Integer(l), Value::Float(r)) => Ok(Value::Boolean((*l as f64) == *r)),
+                    (Value::Float(l), Value::Integer(r)) => Ok(Value::Boolean(*l == (*r as f64))),
+                    (Value::Boolean(l), Value::Boolean(r)) => Ok(Value::Boolean(l == r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Boolean(l == r)),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::NotEqual => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Integer(l), Value::Integer(r)) => Ok(Value::Boolean(l != r)),
+                    (Value::Float(l), Value::Float(r)) => Ok(Value::Boolean(l != r)),
+                    (Value::Integer(l), Value::Float(r)) => Ok(Value::Boolean((*l as f64) != *r)),
+                    (Value::Float(l), Value::Integer(r)) => Ok(Value::Boolean(*l != (*r as f64))),
+                    (Value::Boolean(l), Value::Boolean(r)) => Ok(Value::Boolean(l != r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Boolean(l != r)),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::LogicalAnd => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Boolean(l), Value::Boolean(r)) => Ok(Value::Boolean(*l && *r)),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::LogicalOr => {
+            if args.len() == 2 {
+                let left = &args[0];
+                let right = &args[1];
+                match (left, right) {
+                    (Value::Boolean(l), Value::Boolean(r)) => Ok(Value::Boolean(*l || *r)),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
+        Operator::LogicalNot => {
+            if args.len() == 1 {
+                let value = &args[0];
+                match value {
+                    Value::Boolean(v) => Ok(Value::Boolean(!v)),
+                    _ => Err(ComputationError::IncompatibleTypes),
+                }
+            }
+            else {
+                Err(ComputationError::IncorrectNumberOfArguments)
+            }
+        },
         Operator::BitwiseAnd => {
             if args.len() == 2 {
                 let left = &args[0];
@@ -249,14 +399,7 @@ fn compute_operation(op: Operator, args: Vec<Value>) -> Result<Value, Computatio
             else {
                 Err(ComputationError::IncorrectNumberOfArguments)
             }
-        },
-        // Operator::ParenthesisLeft => todo!(),
-        // Operator::ParenthesisRight => todo!(),
-        // Operator::BracketLeft => todo!(),
-        // Operator::BracketRight => todo!(),
-        // Operator::BraceLeft => todo!(),
-        // Operator::BraceRight => todo!(),
-        _ => return Err(ComputationError::NotImplemented),
+        }
     }
 }
 
@@ -288,6 +431,7 @@ pub fn print_computation_error(err: ComputationError) {
         ComputationError::IncorrectNumberOfArguments => println!("Error: Incorrect number of arguments"),
         ComputationError::IncompatibleTypes => println!("Error: Incompatible types"),
         ComputationError::AstError(ast_error) => print_ast_error(ast_error),
+        ComputationError::ExpectedBooleanValue => println!("Error: Conditions require a boolean value"),
         ComputationError::NotImplemented => println!("Error: Not implemented"),
     }
 }

@@ -1,3 +1,5 @@
+use std::fmt::write;
+
 use thiserror::Error;
 
 use crate::lexing::{Lexer, LexicalToken, LexicalTokenContext, LexicalTokenizeError};
@@ -7,7 +9,7 @@ pub enum AstNode {
     Atom(Atom),
     Assignment { target: Box<AstNode>, value: Box<AstNode> },
     Expression { head: Box<AstNode>, args: Vec<Box<AstNode>> },
-    Condition { test: Box<AstNode>, consequent: Box<AstNode>, alternate: Box<AstNode> },
+    Condition { test: Box<AstNode>, consequent: Box<AstNode>, alternate: Option<Box<AstNode>> },
 }
 
 impl AstNode {
@@ -19,6 +21,12 @@ impl AstNode {
             Some(AstNode::Atom(atom))
         }
         else if let Some(atom) = Atom::identifier(lexical_token) {
+            Some(AstNode::Atom(atom))
+        }
+        else if let Some(atom) = Atom::delimiter(lexical_token) {
+            Some(AstNode::Atom(atom))
+        }
+        else if let Some(atom) = Atom::keyword(lexical_token) {
             Some(AstNode::Atom(atom))
         }
         else {
@@ -51,7 +59,7 @@ impl AstNode {
         }
     }
 
-    fn get_condition(&self) -> Option<(&AstNode, &AstNode, &AstNode)> {
+    fn get_condition(&self) -> Option<(&AstNode, &AstNode, &Option<Box<AstNode>>)> {
         if let AstNode::Condition { test, consequent, alternate } = self {
             Some((test, consequent, alternate))
         } 
@@ -70,9 +78,25 @@ impl std::fmt::Display for AstNode {
                 let args_str: Vec<String> = args.iter().map(|arg| format!("{}", arg)).collect();
                 write!(f, "({} {})", head, args_str.join(" "))
             }
-            AstNode::Condition { test, consequent, alternate } => write!(f, "(if ({}) {{{}}} else {{{}}})", test, consequent, alternate),
+            AstNode::Condition { test, consequent, alternate } => {
+                if let Some(alt) = alternate {
+                    write!(f, "(if {} {{ {} }} else {{ {} }})", test, consequent, alt)
+                } 
+                else {
+                    write!(f, "(if {} {{ {} }})", test, consequent)
+                }
+            },
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AtomKind {
+    Value,
+    Operator,
+    Identifier,
+    Keyword,
+    Delimiter,
 }
 
 #[derive(Debug)]
@@ -80,6 +104,8 @@ pub enum Atom {
     Value(Value),
     Operator(Operator),
     Identifier(String),
+    Keyword(Keyword),
+    Delimiter(Delimiter),
 }
 
 impl Atom {
@@ -88,7 +114,7 @@ impl Atom {
             LexicalToken::Integer(value) => Some(Value::Integer(*value)),
             LexicalToken::Float(value) => Some(Value::Float(*value)),
             LexicalToken::StringLiteral(value) => Some(Value::String(value.clone())),
-            LexicalToken::Boolean(value) => Some(Value::Bool(*value)),
+            LexicalToken::Boolean(value) => Some(Value::Boolean(*value)),
             _ => None,
         };
 
@@ -109,18 +135,14 @@ impl Atom {
             LexicalToken::EqualEqualSign => Some(Operator::Equal),
             LexicalToken::ExclamationMarkEqualSign => Some(Operator::NotEqual),
             LexicalToken::Ampersand => Some(Operator::BitwiseAnd),
+            LexicalToken::AmpersandAmpersand => Some(Operator::LogicalAnd),
             LexicalToken::Pipe => Some(Operator::BitwiseOr),
+            LexicalToken::PipePipe => Some(Operator::LogicalOr),
+            LexicalToken::ExclamationMark => Some(Operator::LogicalNot),
             LexicalToken::Caret => Some(Operator::BitwiseXor),
             LexicalToken::Tilde => Some(Operator::BitwiseNot),
             LexicalToken::LessThanLessThanSign => Some(Operator::LeftShift),
             LexicalToken::GreaterThanGreaterThanSign => Some(Operator::RightShift),
-            LexicalToken::ExclamationMark => Some(Operator::Not),
-            LexicalToken::ParenthesisLeft => Some(Operator::ParenthesisLeft),
-            LexicalToken::ParenthesisRight => Some(Operator::ParenthesisRight),
-            LexicalToken::BracketLeft => Some(Operator::BracketLeft),
-            LexicalToken::BracketRight => Some(Operator::BracketRight),
-            LexicalToken::BraceLeft => Some(Operator::BraceLeft),
-            LexicalToken::BraceRight => Some(Operator::BraceRight),
             _ => None,
         };
 
@@ -136,6 +158,45 @@ impl Atom {
         }
     }
 
+    fn delimiter(lexical_token: &LexicalToken) -> Option<Atom> {
+        let delim = match lexical_token {
+            LexicalToken::ParenthesisLeft => Some(Delimiter::ParenthesisLeft),
+            LexicalToken::ParenthesisRight => Some(Delimiter::ParenthesisRight),
+            LexicalToken::BracketLeft => Some(Delimiter::BracketLeft),
+            LexicalToken::BracketRight => Some(Delimiter::BracketRight),
+            LexicalToken::BraceLeft => Some(Delimiter::BraceLeft),
+            LexicalToken::BraceRight => Some(Delimiter::BraceRight),
+            _ => None,
+        };
+
+        delim.map(|d| Atom::Delimiter(d))
+    }
+
+    fn keyword(lexical_token: &LexicalToken) -> Option<Atom> {
+        let keyword = match lexical_token {
+            LexicalToken::If => Some(Keyword::If),
+            LexicalToken::Else => Some(Keyword::Else),
+            LexicalToken::While => Some(Keyword::While),
+            LexicalToken::For => Some(Keyword::For),
+            LexicalToken::Loop => Some(Keyword::Loop),
+            LexicalToken::Break => Some(Keyword::Break),
+            LexicalToken::Continue => Some(Keyword::Continue),
+            _ => None,
+        };
+
+        keyword.map(|k| Atom::Keyword(k))
+    }
+
+    fn kind(&self) -> AtomKind {
+        match self {
+            Atom::Value(_) => AtomKind::Value,
+            Atom::Operator(_) => AtomKind::Operator,
+            Atom::Identifier(_) => AtomKind::Identifier,
+            Atom::Keyword(_) => AtomKind::Keyword,
+            Atom::Delimiter(_) => AtomKind::Delimiter,
+        }
+    }
+
     fn is_value(&self) -> bool {
         matches!(self, Atom::Value(_))
     }
@@ -146,6 +207,14 @@ impl Atom {
 
     fn is_identifier(&self) -> bool {
         matches!(self, Atom::Identifier(_))
+    }
+
+    fn is_delimiter(&self) -> bool {
+        matches!(self, Atom::Delimiter(_))
+    }
+
+    fn is_keyword(&self) -> bool {
+        matches!(self, Atom::Keyword(_))
     }
 
     fn get_value(&self) -> Option<&Value> {
@@ -174,6 +243,24 @@ impl Atom {
             None
         }
     }
+
+    fn get_delimiter(&self) -> Option<&Delimiter> {
+        if let Atom::Delimiter(delimiter) = self {
+            Some(delimiter)
+        }
+        else {
+            None
+        }
+    }
+
+    fn get_keyword(&self) -> Option<&Keyword> {
+        if let Atom::Keyword(keyword) = self {
+            Some(keyword)
+        }
+        else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Display for Atom {
@@ -182,16 +269,19 @@ impl std::fmt::Display for Atom {
             Atom::Value(value) => write!(f, "{}", value),
             Atom::Operator(operator) => write!(f, "{}", operator),
             Atom::Identifier(name) => write!(f, "{}", name),
+            Atom::Keyword(keyword) => write!(f, "{}", keyword),
+            Atom::Delimiter(delimiter) => write!(f, "{}", delimiter),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    Unit,
     Integer(u64),
     Float(f64),
     String(String),
-    Bool(bool)
+    Boolean(bool)
 }
 
 impl Value {
@@ -208,17 +298,18 @@ impl Value {
     }
 
     pub fn boolean(value: bool) -> Self {
-        Value::Bool(value)
+        Value::Boolean(value)
     }
 }
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Value::Unit => write!(f, "()"),
             Value::Integer(val) => write!(f, "{}", val),
             Value::Float(val) => write!(f, "{}", val),
             Value::String(val) => write!(f, "{}", val),
-            Value::Bool(val) => write!(f, "{}", val),
+            Value::Boolean(val) => write!(f, "{}", val),
         }
     }
 }
@@ -236,21 +327,15 @@ pub enum Operator {
     GreaterThanOrEqual,
     Equal,
     NotEqual,
-    And,
-    Or,
-    Not,
+    LogicalAnd,
+    LogicalOr,
+    LogicalNot,
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
     LeftShift,
     RightShift,
     BitwiseNot,
-    ParenthesisLeft,
-    ParenthesisRight,
-    BracketLeft,
-    BracketRight,
-    BraceLeft,
-    BraceRight
 }
 
 impl std::fmt::Display for Operator {
@@ -267,21 +352,63 @@ impl std::fmt::Display for Operator {
             Operator::GreaterThanOrEqual => write!(f, ">="),
             Operator::Equal => write!(f, "=="),
             Operator::NotEqual => write!(f, "!="),
-            Operator::And => write!(f, "&&"),
-            Operator::Or => write!(f, "||"),
-            Operator::Not => write!(f, "!"),
+            Operator::LogicalAnd => write!(f, "&&"),
+            Operator::LogicalOr => write!(f, "||"),
+            Operator::LogicalNot => write!(f, "!"),
             Operator::BitwiseAnd => write!(f, "&"),
             Operator::BitwiseOr => write!(f, "|"),
             Operator::BitwiseXor => write!(f, "^"),
             Operator::LeftShift => write!(f, "<<"),
             Operator::RightShift => write!(f, ">>"),
             Operator::BitwiseNot => write!(f, "~"),
-            Operator::ParenthesisLeft => write!(f, "("),
-            Operator::ParenthesisRight => write!(f, ")"),
-            Operator::BracketLeft => write!(f, "["),
-            Operator::BracketRight => write!(f, "]"),
-            Operator::BraceLeft => write!(f, "{{"),
-            Operator::BraceRight => write!(f, "}}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delimiter {
+    ParenthesisLeft,
+    ParenthesisRight,
+    BracketLeft,
+    BracketRight,
+    BraceLeft,
+    BraceRight
+}
+
+impl std::fmt::Display for Delimiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Delimiter::ParenthesisLeft => write!(f, "("),
+            Delimiter::ParenthesisRight => write!(f, ")"),
+            Delimiter::BracketLeft => write!(f, "["),
+            Delimiter::BracketRight => write!(f, "]"),
+            Delimiter::BraceLeft => write!(f, "{{"),
+            Delimiter::BraceRight => write!(f, "}}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keyword {
+    If,
+    Else,
+    While,
+    For,
+    Loop,
+    Break,
+    Continue,
+}
+
+impl std::fmt::Display for Keyword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Keyword::If => write!(f, "if"),
+            Keyword::Else => write!(f, "else"),
+            Keyword::While => write!(f, "while"),
+            Keyword::For => write!(f, "for"),
+            Keyword::Loop => write!(f, "loop"),
+            Keyword::Break => write!(f, "break"),
+            Keyword::Continue => write!(f, "continue"),
         }
     }
 }
@@ -325,36 +452,94 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
         None => return Err(AstError::UnexpectedToken(current_token.clone(), line!())),
     };
 
-    let mut lhs = if atom.is_operator() {
-        let op = lhs.get_atom().unwrap().get_operator().unwrap();
-        match op {
-            Operator::ParenthesisLeft => {
-                let lhs = expr_bp(lexer, 0)?;
-                if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::ParenthesisRight) {
-                    return Err(AstError::UnmatchedParentheses);
-                }
+    let mut lhs = match atom.kind() {
+        AtomKind::Delimiter => {
+            let delimiter = atom.get_delimiter().unwrap();
+            match delimiter {
+                Delimiter::ParenthesisLeft => {
+                    let lhs = expr_bp(lexer, 0)?;
+                    if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::ParenthesisRight) {
+                        return Err(AstError::UnmatchedParentheses);
+                    }
 
-                lhs
-            },
-            _ => {
-                let ((), r_bp) = prefix_binding_power(&lhs, &current_token)?;
-                let rhs = expr_bp(lexer, r_bp)?;
-                AstNode::Expression {
-                    head: Box::new(lhs),
-                    args: vec![Box::new(rhs)],
+                    lhs
+                },
+                _ => {
+                    return Err(AstError::UnexpectedToken(current_token.clone(), line!()));
                 }
             }
+        },
+        AtomKind::Operator => {
+            let ((), r_bp) = prefix_binding_power(&lhs, &current_token)?;
+            let rhs = expr_bp(lexer, r_bp)?;
+            AstNode::Expression {
+                head: Box::new(lhs),
+                args: vec![Box::new(rhs)],
+            }
+        },
+        AtomKind::Keyword => {
+            let keyword = atom.get_keyword().unwrap();
+            let current_token = current_token.clone();
+            match keyword {
+                Keyword::If => {
+                    let test = expr_bp(lexer, 0)?;
+                    if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BraceLeft) {
+                        return Err(AstError::UnexpectedToken(current_token.clone(), line!()));
+                    }
+
+                    let consequent = expr_bp(lexer, 0)?;
+                    if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BraceRight) {
+                        return Err(AstError::UnmatchedBraces);
+                    }
+
+                    let next_token = lexer.peek();
+                    let alternative = if next_token.map(|t| t.get_token()) == Some(&LexicalToken::Else) {
+                        lexer.next(); // Consume 'else'
+                        let next_token = lexer.peek().map(|t| t.get_token());
+                        
+                        let else_if;
+                        if next_token == Some(&LexicalToken::BraceLeft)  {
+                            lexer.next(); // Consume '{'
+                            else_if = false;
+                        }
+                        else if next_token == Some(&LexicalToken::If) {
+                            // Don't consume 'if' here, let the recursive call handle it
+                            else_if = true;
+                        }
+                        else{
+                            return Err(AstError::UnexpectedToken(current_token.clone(), line!()));
+                        }
+
+                        let alt = expr_bp(lexer, 0)?;
+                        // Else if will share the closing brace (and parsing if already checks for matching braces)
+                        if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BraceRight) && !else_if {
+                            return Err(AstError::UnmatchedBraces);
+                        }
+
+                        Some(Box::new(alt))
+                    }
+                    else{
+                        None
+                    };
+
+                    AstNode::Condition {
+                        test: Box::new(test),
+                        consequent: Box::new(consequent),
+                        alternate: alternative,
+                    }
+                }
+                _ => return Err(AstError::UnexpectedEndOfFile), // Placeholder for future keyword handling
+            }
         }
-    }
-    else{
-        lhs
+        _ => lhs,
     };
 
     loop {
         let current_token = lexer.peek();
         let (op, current_token) = match current_token {
             Some(token) => match AstNode::atom(token.get_token()) {
-                Some(node) if node.get_atom().map(|a| a.is_operator()).unwrap_or(false) => (node, token),
+                Some(node) if node.get_atom().map(|a| a.is_operator() || a.is_delimiter()).unwrap_or(false) => (node, token),
+                //Some(node) if node.get_atom().map(|a| a.is_delimiter()).unwrap_or(false) => break, // 
                 Some(_) => return Err(AstError::UnexpectedToken(token.clone(), line!())),
                 None => return Err(AstError::UnexpectedToken(token.clone(), line!())),
             },
@@ -374,7 +559,7 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
                 if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BracketRight) {
                     return Err(AstError::UnmatchedBrackets);
                 }
-                
+
                 AstNode::Expression {
                     head: Box::new(op),
                     args: vec![Box::new(lhs), Box::new(rhs)],
@@ -417,8 +602,8 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
 fn prefix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Result<((), u8), AstError> {
     match op.get_atom() {
         Some(Atom::Operator(operator)) => match operator {
-            Operator::Plus | Operator::Minus => Ok(((), 17)),
-            Operator::BitwiseNot | Operator::Not => Ok(((), 17)),
+            Operator::Plus | Operator::Minus => Ok(((), 23)),
+            Operator::BitwiseNot | Operator::LogicalNot => Ok(((), 23)),
             _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
         },
         _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
@@ -427,10 +612,11 @@ fn prefix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Re
 
 fn postfix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Result<Option<(u8, ())>, AstError> {
     match op.get_atom() {
-        Some(Atom::Operator(operator)) => match operator {
-            Operator::BracketLeft => Ok(Some((19, ()))),
+        Some(Atom::Delimiter(delimiter)) => match delimiter {
+            Delimiter::BracketLeft => Ok(Some((25, ()))),
             _ => Ok(None),
         },
+        Some(Atom::Operator(_)) => Ok(None),
         _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
     }
 }
@@ -438,16 +624,21 @@ fn postfix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> R
 fn infix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Result<Option<(u8, u8)>, AstError> {
     match op.get_atom() {
         Some(Atom::Operator(operator)) => match operator {
-            Operator::BitwiseOr => Ok(Some((1, 2))),
-            Operator::BitwiseXor => Ok(Some((3, 4))),
-            Operator::BitwiseAnd => Ok(Some((5, 6))),
-            Operator::Equal | Operator::NotEqual => Ok(Some((7, 8))),
-            Operator::LessThan | Operator::LessThanOrEqual | Operator::GreaterThan | Operator::GreaterThanOrEqual => Ok(Some((9, 10))),
-            Operator::LeftShift | Operator::RightShift => Ok(Some((11, 12))),
-            Operator::Plus | Operator::Minus => Ok(Some((13, 14))),
-            Operator::Multiply | Operator::Divide | Operator::Modulo => Ok(Some((15, 16))),
+            // TODO: Add assignment operator with lowest precedence
+            Operator::LogicalOr => Ok(Some((3, 4))),
+            Operator::LogicalAnd => Ok(Some((5, 6))),
+            Operator::BitwiseOr => Ok(Some((7, 8))),
+            Operator::BitwiseXor => Ok(Some((9, 10))),
+            Operator::BitwiseAnd => Ok(Some((11, 12))),
+            Operator::Equal | Operator::NotEqual => Ok(Some((13, 14))),
+            Operator::LessThan | Operator::LessThanOrEqual
+            | Operator::GreaterThan | Operator::GreaterThanOrEqual => Ok(Some((15, 16))),
+            Operator::LeftShift | Operator::RightShift => Ok(Some((17, 18))),
+            Operator::Plus | Operator::Minus => Ok(Some((19, 20))),
+            Operator::Multiply | Operator::Divide | Operator::Modulo => Ok(Some((21, 22))),
             _ => Ok(None),
         },
+        Some(Atom::Delimiter(_)) => Ok(None),
         _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
     }
 }
@@ -494,5 +685,56 @@ mod ast_test {
         let result = expr(input);
         let ast = result.unwrap();
         assert_eq!(ast.to_string(), "([ ([ x 0) 1)");
+    }
+
+    #[test]
+    fn test_parsing_6() {
+        let input = "if (x < 10) { x + 1 } else { x + 2 }";
+        let result = expr(input);
+        let ast = result.unwrap();
+        assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) } else { (+ x 2) })");
+    }
+
+    #[test]
+    fn test_parsing_7() {
+        let input = "if (x < 10) { x + 1 }";
+        let result = expr(input);
+        let ast = result.unwrap();
+        assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) })");
+    }
+
+    #[test]
+    fn test_parsing_8() { 
+        let input = "if x == 0 { 1 } else if x == 1 { 2 } else { 3 }";
+        let result = expr(input);
+        let ast = result.unwrap();
+        // Else if and else { if } are parsed into the same structure
+        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })");
+    }
+
+    #[test]
+    fn test_parsing_9() { 
+        let input = "if x == 0 { 1 } else { if x == 1 { 2 } else { 3 } }";
+        let result = expr(input);
+        let ast = result.unwrap();
+        // Else if and else { if } are parsed into the same structure
+        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })");
+    }
+
+    #[test]
+    fn test_parsing_10() { 
+        let input = "if x == 0 { 1 } else if x >= 1 && x <= 10 { 2 } else { 3 }";
+        let result = expr(input);
+        let ast = result.unwrap();
+        // Else if and else { if } are parsed into the same structure
+        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (&& (>= x 1) (<= x 10)) { 2 } else { 3 }) })");
+    }
+
+    #[test]
+    fn test_parsing_11() {
+        let input = "if (x < 10 || x > 5) { x + 1 }";
+        let result = expr(input);
+        let ast = result.unwrap();
+        assert_eq!(ast.to_string(), "(if (|| (< x 10) (> x 5)) { (+ x 1) })");
     }
 }
