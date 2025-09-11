@@ -1,13 +1,22 @@
-use std::fmt::write;
-
 use thiserror::Error;
 
 use crate::lexing::{Lexer, LexicalToken, LexicalTokenContext, LexicalTokenizeError};
 
 #[derive(Debug)]
+pub struct Program {
+    pub body: Vec<AstNode>,
+}
+
+impl Program {
+    pub fn new(body: Vec<AstNode>) -> Self {
+        Program { body }
+    }
+}
+
+#[derive(Debug)]
 pub enum AstNode {
     Atom(Atom),
-    Assignment { target: Box<AstNode>, value: Box<AstNode> },
+    Assignment { target: Box<AstNode>, value: Box<AstNode>, constant: bool },
     Expression { head: Box<AstNode>, args: Vec<Box<AstNode>> },
     Condition { test: Box<AstNode>, consequent: Box<AstNode>, alternate: Option<Box<AstNode>> },
 }
@@ -73,7 +82,7 @@ impl std::fmt::Display for AstNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AstNode::Atom(atom) => write!(f, "{}", atom),
-            AstNode::Assignment { target, value } => write!(f, "({} = {})", target, value),
+            AstNode::Assignment { target, value, constant } => write!(f, "({} {} = {})", if *constant { "const" } else { "let" }, target, value),
             AstNode::Expression { head, args } => {
                 let args_str: Vec<String> = args.iter().map(|arg| format!("{}", arg)).collect();
                 write!(f, "({} {})", head, args_str.join(" "))
@@ -181,6 +190,8 @@ impl Atom {
             LexicalToken::Loop => Some(Keyword::Loop),
             LexicalToken::Break => Some(Keyword::Break),
             LexicalToken::Continue => Some(Keyword::Continue),
+            LexicalToken::Let => Some(Keyword::Let),
+            LexicalToken::Const => Some(Keyword::Const),
             _ => None,
         };
 
@@ -397,6 +408,8 @@ pub enum Keyword {
     Loop,
     Break,
     Continue,
+    Let,
+    Const,
 }
 
 impl std::fmt::Display for Keyword {
@@ -409,6 +422,8 @@ impl std::fmt::Display for Keyword {
             Keyword::Loop => write!(f, "loop"),
             Keyword::Break => write!(f, "break"),
             Keyword::Continue => write!(f, "continue"),
+            Keyword::Let => write!(f, "let"),
+            Keyword::Const => write!(f, "const"),
         }
     }
 }
@@ -431,9 +446,30 @@ pub enum AstError {
     UnexpectedEndOfFile,
 }
 
-pub fn expr(input: &str) -> Result<AstNode, AstError> {
+pub fn expr(input: &str) -> Result<Program, AstError> {
     let mut lexer = Lexer::new(input)?;
-    expr_bp(&mut lexer, 0)
+    let mut statements = Vec::new();
+    loop {
+        let statement = expr_bp(&mut lexer, 0)?;
+        statements.push(statement);
+        let token = lexer.peek();
+        let semicolon = token.map(|t| t.get_token());
+        match semicolon {
+            Some(&LexicalToken::Semicolon) => {
+                lexer.next(); // Consume the semicolon
+                continue;
+            },
+            Some(_) => {
+                return Err(AstError::UnexpectedToken(token.unwrap().clone(), line!()));
+            },
+            // Some(&LexicalToken::EndOfFile) => {
+            //     break;
+            // },
+            None => break,
+        }
+    }
+
+    Ok(Program::new(statements))
 }
 
 fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
@@ -528,6 +564,9 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
                         alternate: alternative,
                     }
                 }
+                Keyword::Else => return Err(AstError::UnexpectedToken(current_token.clone(), line!())),
+                Keyword::Let => parse_assignment(lexer, false)?,
+                Keyword::Const => parse_assignment(lexer, true)?,
                 _ => return Err(AstError::UnexpectedEndOfFile), // Placeholder for future keyword handling
             }
         }
@@ -599,6 +638,36 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
     Ok(lhs)
 }
 
+fn parse_assignment(lexer: &mut Lexer, constant: bool) -> Result<AstNode, AstError> {
+    let identifier_token = lexer.next();
+    let identifier_token = match identifier_token {
+        Some(token) => token,
+        None => return Err(AstError::UnexpectedEndOfFile),
+    };
+
+    let identifier = match AstNode::atom(identifier_token.get_token()) {
+        Some(node) => match node.get_atom() {
+            Some(atom) if atom.is_identifier() => node,
+            _ => return Err(AstError::UnexpectedToken(identifier_token.clone(), line!())),
+        },
+        None => return Err(AstError::UnexpectedToken(identifier_token.clone(), line!())),
+    };
+
+    let equal_token = lexer.next();
+    let equal_token = match equal_token {
+        Some(token) => token,
+        None => return Err(AstError::UnexpectedEndOfFile),
+    };
+
+    if equal_token.get_token() != &LexicalToken::EqualSign {
+        return Err(AstError::UnexpectedToken(equal_token.clone(), line!()));
+    }
+
+    let value = expr_bp(lexer, 0)?;
+
+    Ok(AstNode::Assignment { target: Box::new(identifier), value: Box::new(value), constant })
+}
+
 fn prefix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Result<((), u8), AstError> {
     match op.get_atom() {
         Some(Atom::Operator(operator)) => match operator {
@@ -651,7 +720,7 @@ mod ast_test {
     fn test_parsing_1() {
         let input = "1 + 2";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(+ 1 2)");
     }
 
@@ -659,7 +728,7 @@ mod ast_test {
     fn test_parsing_2() {
         let input = "1 + 2 * 3";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(+ 1 (* 2 3))");
     }
 
@@ -667,7 +736,7 @@ mod ast_test {
     fn test_parsing_3() {
         let input = "--1 * 2";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(* (- (- 1)) 2)");
     }
 
@@ -675,7 +744,7 @@ mod ast_test {
     fn test_parsing_4() {
         let input = "(((0)))";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "0");
     }
 
@@ -683,7 +752,7 @@ mod ast_test {
     fn test_parsing_5() {
         let input = "x[0][1]";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "([ ([ x 0) 1)");
     }
 
@@ -691,7 +760,7 @@ mod ast_test {
     fn test_parsing_6() {
         let input = "if (x < 10) { x + 1 } else { x + 2 }";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) } else { (+ x 2) })");
     }
 
@@ -699,7 +768,7 @@ mod ast_test {
     fn test_parsing_7() {
         let input = "if (x < 10) { x + 1 }";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) })");
     }
 
@@ -707,7 +776,7 @@ mod ast_test {
     fn test_parsing_8() { 
         let input = "if x == 0 { 1 } else if x == 1 { 2 } else { 3 }";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         // Else if and else { if } are parsed into the same structure
         assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })");
     }
@@ -716,7 +785,7 @@ mod ast_test {
     fn test_parsing_9() { 
         let input = "if x == 0 { 1 } else { if x == 1 { 2 } else { 3 } }";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         // Else if and else { if } are parsed into the same structure
         assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })");
     }
@@ -725,7 +794,7 @@ mod ast_test {
     fn test_parsing_10() { 
         let input = "if x == 0 { 1 } else if x >= 1 && x <= 10 { 2 } else { 3 }";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         // Else if and else { if } are parsed into the same structure
         assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (&& (>= x 1) (<= x 10)) { 2 } else { 3 }) })");
     }
@@ -734,7 +803,15 @@ mod ast_test {
     fn test_parsing_11() {
         let input = "if (x < 10 || x > 5) { x + 1 }";
         let result = expr(input);
-        let ast = result.unwrap();
+        let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(if (|| (< x 10) (> x 5)) { (+ x 1) })");
+    }
+
+    #[test]
+    fn test_parsing_12() {
+        let input = "let x = 10";
+        let result = expr(input);
+        let ast = &result.unwrap().body[0];
+        assert_eq!(ast.to_string(), "(let x = 10)");
     }
 }

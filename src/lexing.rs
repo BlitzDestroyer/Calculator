@@ -49,6 +49,8 @@ pub enum LexicalToken {
     Loop,
     Break,
     Continue,
+    Let,
+    Const,
 }
 
 impl LexicalToken {
@@ -96,6 +98,8 @@ impl LexicalToken {
             LexicalToken::Loop => Some("loop"),
             LexicalToken::Break => Some("break"),
             LexicalToken::Continue => Some("continue"),
+            LexicalToken::Let => Some("let"),
+            LexicalToken::Const => Some("const"),
         }
     }
 }
@@ -655,6 +659,8 @@ fn parse_buffer(buffer: &mut String, token_type: LexicalTokenType, tokens: &mut 
                     "loop" => LexicalToken::Loop,
                     "break" => LexicalToken::Break,
                     "continue" => LexicalToken::Continue,
+                    "let" => LexicalToken::Let,
+                    "const" => LexicalToken::Const,
                     _ => LexicalToken::Identifier(buffer.clone()),
                 };
                 let token_literal = buffer.clone();

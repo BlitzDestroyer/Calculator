@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use thiserror::Error;
 
 use crate::{lexing::LexicalTokenizeError, parsing::{AstError, AstNode, Atom, Operator, Value}};
@@ -16,11 +18,52 @@ pub enum ComputationError {
     AstError(#[from] AstError),
     #[error("Expected boolean value")]
     ExpectedBooleanValue,
+    #[error("Cannot reassign to constant variable")]
+    CannotReassignToConstantVariable,
+    #[error("Variable not defined")]
+    VariableNotDefined,
     #[error("Not implemented")]
     NotImplemented,
 }
 
+#[derive(Debug)]
+pub struct ProgramState {
+    frames: Vec<ProgramFrame>,
+}
+
+impl ProgramState {
+    pub fn new() -> Self {
+        Self {
+            frames: vec![ProgramFrame::new()],
+        }
+    }
+
+    pub fn get_variable(&self, name: &str) -> Result<Value, ComputationError> {
+        for frame in self.frames.iter().rev() {
+            if let Some((value, _)) = frame.variables.get(name) {
+                return Ok(value.clone());
+            }
+        }
+
+        Err(ComputationError::VariableNotDefined)
+    }
+}
+
+#[derive(Debug)]
+pub struct ProgramFrame {
+    variables: HashMap<String, (Value, bool)>, // bool indicates if the variable is mutable
+}
+
+impl ProgramFrame {
+    pub fn new() -> Self {
+        Self {
+            variables: HashMap::new(),
+        }
+    }
+}
+
 pub fn repl() {
+    let mut state = ProgramState::new();
     let mut input = String::new();
     loop {
         print!("> ");
@@ -35,7 +78,7 @@ pub fn repl() {
                 println!("  q | quit   - Exit the REPL");
             }
             _ => {
-                let result = compute_line(user_input);
+                let result = compute_line(user_input, &mut state);
                 match result {
                     Ok(value) => println!("Result: {}", value),
                     Err(err) => print_computation_error(err),
@@ -46,38 +89,53 @@ pub fn repl() {
     }
 }
 
-pub fn compute_line(line: &str) -> Result<Value, ComputationError> {
+pub fn compute_line(line: &str, state: &mut ProgramState) -> Result<Value, ComputationError> {
     let ast = crate::parsing::expr(line)?;
-    let value = get_ast_node_value(&ast)?;
+    let value = get_ast_node_value(&ast.body[0], state)?;
 
     Ok(value)
 }
 
-fn get_ast_node_value(node: &AstNode) -> Result<Value, ComputationError> {
+fn get_ast_node_value(node: &AstNode, state: &mut ProgramState) -> Result<Value, ComputationError> {
     match node {
-        AstNode::Atom(atom) => get_atom_value(atom),
+        AstNode::Atom(atom) => get_atom_value(atom, state),
         AstNode::Expression { head, args } => {
-            let args = args.iter().map(|arg| get_ast_node_value(arg)).collect::<Result<Vec<_>, _>>()?;
+            let args = args.iter().map(|arg| get_ast_node_value(arg, state)).collect::<Result<Vec<_>, _>>()?;
             let op = get_ast_node_operator(head)?;
             compute_operation(op, args)
         }
-        AstNode::Condition { test, consequent, alternate } => compute_condition(test, consequent, alternate),
-        _ => Err(ComputationError::NotImplemented),
+        AstNode::Condition { test, consequent, alternate } => compute_condition(test, consequent, alternate, state),
+        AstNode::Assignment { target, value, constant } => {
+            let value = get_ast_node_value(value, state)?;
+            match target.as_ref() {
+                AstNode::Atom(Atom::Identifier(name)) => {
+                    if state.frames.last_mut().unwrap().variables.contains_key(name) {
+                        let (_, is_constant) = state.frames.last_mut().unwrap().variables.get(name).unwrap();
+                        if *is_constant {
+                            return Err(ComputationError::CannotReassignToConstantVariable);
+                        }
+                    }
+                    state.frames.last_mut().unwrap().variables.insert(name.clone(), (value.clone(), *constant));
+                    Ok(value)
+                }
+                _ => Err(ComputationError::ExpectedValueAtom),
+            }
+        }
     }
 }
 
-fn compute_condition(condition: &AstNode, consequent: &AstNode, alternate: &Option<Box<AstNode>>) -> Result<Value, ComputationError> {
-    let value = get_ast_node_value(condition)?;
+fn compute_condition(condition: &AstNode, consequent: &AstNode, alternate: &Option<Box<AstNode>>, state: &mut ProgramState) -> Result<Value, ComputationError> {
+    let value = get_ast_node_value(condition, state)?;
     let bool = match value {
         Value::Boolean(b) => b,
         _ => return Err(ComputationError::ExpectedBooleanValue),
     };
 
     if bool {
-        get_ast_node_value(consequent)
+        get_ast_node_value(consequent, state)
     }
     else if let Some(alternate) = alternate {
-        get_ast_node_value(alternate)
+        get_ast_node_value(alternate, state)
     }
     else {
         Ok(Value::Unit)
@@ -417,9 +475,10 @@ fn get_atom_operator(atom: &Atom) -> Result<Operator, ComputationError> {
     }
 }
 
-fn get_atom_value(atom: &Atom) -> Result<Value, ComputationError>{
+fn get_atom_value(atom: &Atom, state: &mut ProgramState) -> Result<Value, ComputationError>{
     match atom {
         Atom::Value(value) => Ok(value.clone()),
+        Atom::Identifier(name) => state.get_variable(name),
         _ => Err(ComputationError::ExpectedValueAtom),
     }
 }
@@ -433,6 +492,8 @@ pub fn print_computation_error(err: ComputationError) {
         ComputationError::AstError(ast_error) => print_ast_error(ast_error),
         ComputationError::ExpectedBooleanValue => println!("Error: Conditions require a boolean value"),
         ComputationError::NotImplemented => println!("Error: Not implemented"),
+        ComputationError::CannotReassignToConstantVariable => println!("Error: Cannot reassign to constant variable"),
+        ComputationError::VariableNotDefined => println!("Error: Variable not defined"),
     }
 }
 
@@ -474,106 +535,121 @@ mod computing_test {
 
     #[test]
     fn test_atom() {
+        let mut state = ProgramState::new();
         let atom = Atom::Value(Value::Integer(42));
-        let result = get_atom_value(&atom).unwrap();
+        let result = get_atom_value(&atom, &mut state).unwrap();
         assert_eq!(result, Value::Integer(42));
     }
 
     #[test]
     fn test_expression_addition() {
+        let mut state = ProgramState::new();
         let input = "1 + 1";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(2));
     }
 
     #[test]
     fn test_expression_subtraction() {
+        let mut state = ProgramState::new();
         let input = "2 - 1";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(1));
     }
 
     #[test]
     fn test_expression_negation() {
+        let mut state = ProgramState::new();
         let input = "-1";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(-1i64 as u64));
     }
 
     #[test]
     fn test_expression_multiplication() {
+        let mut state = ProgramState::new();
         let input = "2 * 3";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(6));
     }
 
     #[test]
     fn test_expression_division() {
+        let mut state = ProgramState::new();
         let input = "6 / 2";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(3));
     }
 
     #[test]
     fn test_expression_modulo() {
+        let mut state = ProgramState::new();
         let input = "5 % 2";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(1));
     }
 
     #[test]
     fn test_expression_bitwise_and() {
+        let mut state = ProgramState::new();
         let input = "5 & 3";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(1));
     }
 
     #[test]
     fn test_expression_bitwise_or() {
+        let mut state = ProgramState::new();
         let input = "5 | 3";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(7));
     }
 
     #[test]
     fn test_expression_bitwise_xor() {
+        let mut state = ProgramState::new();
         let input = "5 ^ 3";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(6));
     }
 
     #[test]
     fn test_expression_bitwise_not() {
+        let mut state = ProgramState::new();
         let input = "~5";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(!5));
     }
 
     #[test]
     fn test_expression_left_shift() {
+        let mut state = ProgramState::new();
         let input = "1 << 2";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(4));
     }
 
     #[test]
     fn test_expression_right_shift() {
+        let mut state = ProgramState::new();
         let input = "4 >> 2";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(1));
     }
 
     #[test]
     fn test_expression_complex_1() {
+        let mut state = ProgramState::new();
         let input = "(12 + 3 * (8 - 5)) / (7 - 2) + 18 / (3 * (2 + 1)) - 4";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Integer(2));
     }
 
     #[test]
     fn test_expression_complex_2() {
+        let mut state = ProgramState::new();
         let input = "(12 + 3 * (8.0 - 5)) / (7 - 2) + 18 / (3 * (2 + 1)) - 4";
-        let result = compute_line(input).unwrap();
+        let result = compute_line(input, &mut state).unwrap();
         assert_eq!(result, Value::Float(2.2));
     }
 }
