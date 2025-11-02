@@ -6,7 +6,6 @@ const DIGIT_MAX: u32 = 999_999_999;
 const DIGIT_BASE: u32 = 1_000_000_000;
 const DIGIT_U64_MAX: u64 = 999_999_999_999_999_99;
 const DIGIT_U64_BASE: u64 = 1_000_000_000_000_000_00;
-const STORAGE_LOSS: u32 = u32::MAX - DIGIT_MAX; // 
 
 #[derive(Debug, Error)]
 pub enum BigIntParseError {
@@ -227,6 +226,37 @@ impl BigInt {
         todo!()
     }
 
+    fn inner_add(&self, rhs: &Self) -> Self {
+        if self.sign == rhs.sign {
+            BigInt::from_b10(self.sign, add_least_sig_vec(&self.digits_b10, &rhs.digits_b10))
+        }
+        else {
+            match cmp_least_sig_vec(&self.digits_b10, &rhs.digits_b10) {
+                std::cmp::Ordering::Greater => {
+                    let mut result = BigInt::from_b10(self.sign, sub_least_sig_vec(&self.digits_b10, &rhs.digits_b10));
+                    result.normalize_zero();
+                    result
+                },
+                std::cmp::Ordering::Less => {
+                    let mut result = BigInt::from_b10(rhs.sign, sub_least_sig_vec(&rhs.digits_b10, &self.digits_b10));
+                    result.normalize_zero();
+                    result
+                },
+                std::cmp::Ordering::Equal => BigInt::zero(),
+            }
+        }
+    }
+
+    fn inner_mul(&self, rhs: &Self) -> Self {
+        if self.is_zero() || rhs.is_zero() {
+            return BigInt::zero();
+        }
+
+        let sign = self.sign == rhs.sign;
+        let digits = karatsuba_mul(&self.digits_b10, &rhs.digits_b10);
+        BigInt::from_b10(sign, digits)
+    }
+
     pub fn abs(self) -> Self {
         match self.dirty {
             DigitsDirty::None | DigitsDirty::B10 => Self::from_b2(true, self.digits_b2),
@@ -381,10 +411,137 @@ impl BigInt {
         Ok(result)
     }
 
+    #[inline]
+    pub fn gcd(&self, b: &BigInt) -> BigInt {
+        BigInt::gcd_lehmer(self.clone(), b.clone())
+    }
+
+    pub fn gcd_euclid(&self, b: &BigInt) -> BigInt {
+        let mut a = self.clone();
+        let mut b = b.clone();
+        while !b.is_zero() {
+            let r = a.clone().try_div_mod(b.clone()).unwrap().1;
+            a = b;
+            b = r;
+        }
+        a
+    }
+
+    pub fn gcd_lehmer(mut a: BigInt, mut b: BigInt) -> BigInt {
+        // Step 1.  Ensure a ≥ b ≥ 0
+        if a < b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        if b.is_zero() {
+            return a;
+        }
+
+        // Step 2.  Main loop
+        loop {
+            // If b fits in one limb → do a normal small-int GCD
+            if b.digits_b10.len() == 1 {
+                return gcd_small(a, b);
+            }
+
+            // ---- Lehmer phase ----
+            // Extract top one or two limbs of a,b
+            let (mut ah, mut bh) = leading_digits(&a, &b);
+
+            // Use small 128-bit integers for the “matrix” iteration
+            let mut m00: i128 = 1;
+            let mut m01: i128 = 0;
+            let mut m10: i128 = 0;
+            let mut m11: i128 = 1;
+
+            // repeatedly perform integer steps while the 64-bit approximation holds
+            while bh as i128 + m10 != 0
+                && bh as i128 + m11 != 0
+            {
+                let q = (ah as i128 + m00) / (bh as i128 + m10);
+                let q2 = (ah as i128 + m01) / (bh as i128 + m11);
+                if q != q2 {
+                    break;
+                }
+
+                // update transformation matrix (simulate Euclid)
+                let t = m00 - q * m01;
+                m00 = m01;
+                m01 = t;
+                let t = m10 - q * m11;
+                m10 = m11;
+                m11 = t;
+
+                let tmp = ah as i128 - q * bh as i128;
+                ah = bh;
+                bh = tmp as u128;
+            }
+
+            // ---- Apply matrix to full BigInts ----
+            if m10 != 0 {
+                let a_new = m00 * &a - m01 * &b;
+                let b_new = m10 * a - m11 * b;
+                a = a_new.abs();
+                b = b_new.abs();
+            }
+            else {
+                // The 64-bit model broke down → fall back to full divmod once
+                let r = a.clone().try_div_mod(b.clone()).unwrap().1;
+                a = b;
+                b = r;
+            }
+
+            if b.is_zero() {
+                break;
+            }
+            if a < b {
+                std::mem::swap(&mut a, &mut b);
+            }
+        }
+
+        a
+    }
+
+    // fn mul_small(&self, k: i128) -> BigInt {
+    //     let mut carry: i128 = 0;
+    //     let base = DIGIT_BASE as i128;
+    //     let mut out = Vec::with_capacity(self.digits_b10.len() + 1);
+
+    //     for &d in &self.digits_b10 {
+    //         let val = d as i128 * k + carry;
+    //         carry = val.div_euclid(base);
+    //         out.push((val.rem_euclid(base)) as u32);
+    //     }
+    //     if carry != 0 {
+    //         out.push(carry as u32);
+    //     }
+    //     BigInt::from_b10(self.sign, out)
+    // }
+
     fn normalize_zero(&mut self) {
-        if self.digits_b10.iter().all(|&d| d == 0) {
-            self.sign = true;
-            self.digits_b10 = vec![0];
+        match self.dirty {
+            DigitsDirty::None => {
+                if self.digits_b10.iter().all(|&d| d == 0) {
+                    self.sign = true;
+                    self.digits_b10 = vec![0];
+                    self.digits_b2 = vec![0];
+                }
+            },
+            DigitsDirty::B10 => {
+                if self.digits_b2.iter().all(|&d| d == 0) {
+                    self.sign = true;
+                    self.digits_b2 = vec![0];
+                    self.digits_b10 = vec![0];
+                    self.dirty = DigitsDirty::None;
+                }
+            },
+            DigitsDirty::B2 => {
+                if self.digits_b10.iter().all(|&d| d == 0) {
+                    self.sign = true;
+                    self.digits_b10 = vec![0];
+                    self.digits_b2 = vec![0];
+                    self.dirty = DigitsDirty::None;
+                }
+            },
         }
     }
 }
@@ -495,28 +652,31 @@ impl std::ops::Neg for BigInt {
     }
 }
 
+impl std::ops::Neg for &BigInt {
+    type Output = BigInt;
+
+    fn neg(self) -> Self::Output {
+        if self.is_zero() {
+            return self.clone();
+        }
+
+        BigInt::from_b10(!self.sign, self.digits_b10.clone())
+    }
+}
+
 impl std::ops::Add for BigInt {
     type Output = BigInt;
 
     fn add(self, rhs: Self) -> Self::Output {
-        if self.sign == rhs.sign {
-            BigInt::from_b10(self.sign, add_least_sig_vec(&self.digits_b10, &rhs.digits_b10))
-        }
-        else {
-            match cmp_least_sig_vec(&self.digits_b10, &rhs.digits_b10) {
-                std::cmp::Ordering::Greater => {
-                    let mut result = BigInt::from_b10(self.sign, sub_least_sig_vec(&self.digits_b10, &rhs.digits_b10));
-                    result.normalize_zero();
-                    result
-                },
-                std::cmp::Ordering::Less => {
-                    let mut result = BigInt::from_b10(rhs.sign, sub_least_sig_vec(&rhs.digits_b10, &self.digits_b10));
-                    result.normalize_zero();
-                    result
-                },
-                std::cmp::Ordering::Equal => BigInt::zero(),
-            }
-        }
+        self.inner_add(&rhs)
+    }
+}
+
+impl std::ops::Add<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn add(self, rhs: &BigInt) -> Self::Output {
+        self.inner_add(rhs)
     }
 }
 
@@ -536,10 +696,58 @@ impl<T: Int> std::ops::Add<T> for BigInt
     }
 }
 
+macro_rules! impl_add_bigint_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl std::ops::Add<BigInt> for $t {
+                type Output = BigInt;
+                fn add(self, rhs: BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs + rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs + rhs
+                    }
+                }
+            }
+
+            impl std::ops::Add<&BigInt> for $t {
+                type Output = BigInt;
+                fn add(self, rhs: &BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs + rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs + rhs
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_add_bigint_for_int!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
 impl std::ops::Sub for BigInt {
     type Output = BigInt;
 
     fn sub(self, rhs: Self) -> Self::Output {
+        self + (-rhs)
+    }
+}
+
+impl std::ops::Sub<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn sub(self, rhs: &BigInt) -> Self::Output {
         self + (-rhs)
     }
 }
@@ -559,18 +767,59 @@ impl<T: Int> std::ops::Sub<T> for BigInt {
     }
 }
 
+macro_rules! impl_sub_bigint_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl std::ops::Sub<BigInt> for $t {
+                type Output = BigInt;
+                fn sub(self, rhs: BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs - rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs - rhs
+                    }
+                }
+            }
+
+            impl std::ops::Sub<&BigInt> for $t {
+                type Output = BigInt;
+                fn sub(self, rhs: &BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs - rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs - rhs
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_sub_bigint_for_int!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
 impl std::ops::Mul for BigInt {
     type Output = BigInt;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        if self.is_zero() || rhs.is_zero() {
-            return BigInt::zero();
-        }
+        self.inner_mul(&rhs)
+    }
+}
 
-        let sign = self.sign == rhs.sign;
-        //let digits = mul_least_sig_vec(&self.digits, &rhs.digits);
-        let digits = karatsuba_mul(&self.digits_b10, &rhs.digits_b10);
-        BigInt::from_b10(sign, digits)
+impl std::ops::Mul<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn mul(self, rhs: &BigInt) -> Self::Output {
+        self.inner_mul(rhs)
     }
 }
 
@@ -589,11 +838,60 @@ impl<T: Int> std::ops::Mul<T> for BigInt {
     }
 }
 
+macro_rules! impl_mul_bigint_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl std::ops::Mul<BigInt> for $t {
+                type Output = BigInt;
+                fn mul(self, rhs: BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs * rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs * rhs
+                    }
+                }
+            }
+
+            impl std::ops::Mul<&BigInt> for $t {
+                type Output = BigInt;
+                fn mul(self, rhs: &BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs * rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs * rhs
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_mul_bigint_for_int!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
 impl std::ops::Div for BigInt {
     type Output = BigInt;
 
     fn div(self, rhs: Self) -> Self::Output {
         let (quotient, _remainder) = self.try_div_mod(rhs).unwrap();
+        quotient
+    }
+}
+
+impl std::ops::Div<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn div(self, rhs: &BigInt) -> Self::Output {
+        let (quotient, _remainder) = self.try_div_mod(rhs.clone()).unwrap();
         quotient
     }
 }
@@ -613,11 +911,60 @@ impl<T: Int> std::ops::Div<T> for BigInt {
     }
 }
 
+macro_rules! impl_div_bigint_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl std::ops::Div<BigInt> for $t {
+                type Output = BigInt;
+                fn div(self, rhs: BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs / rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs / rhs
+                    }
+                }
+            }
+
+            impl std::ops::Div<&BigInt> for $t {
+                type Output = BigInt;
+                fn div(self, rhs: &BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs / rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs / rhs
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_div_bigint_for_int!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
 impl std::ops::Rem for BigInt {
     type Output = BigInt;
 
     fn rem(self, rhs: Self) -> Self::Output {
         let (_quotient, remainder) = self.try_div_mod(rhs).unwrap();
+        remainder
+    }
+}
+
+impl std::ops::Rem<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn rem(self, rhs: &BigInt) -> Self::Output {
+        let (_quotient, remainder) = self.try_div_mod(rhs.clone()).unwrap();
         remainder
     }
 }
@@ -636,6 +983,46 @@ impl<T: Int> std::ops::Rem<T> for BigInt {
         }
     }
 }
+
+macro_rules! impl_rem_bigint_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl std::ops::Rem<BigInt> for $t {
+                type Output = BigInt;
+                fn rem(self, rhs: BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs % rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs % rhs
+                    }
+                }
+            }
+
+            impl std::ops::Rem<&BigInt> for $t {
+                type Output = BigInt;
+                fn rem(self, rhs: &BigInt) -> Self::Output {
+                    // Trait is impl for both signed and unsigned types, and the comp is necessary for signed types
+                    #[allow(unused_comparisons)]
+                    if <$t>::min_value() < 0 {
+                        let lhs = BigInt::from_signed(self as i128);
+                        lhs % rhs
+                    }
+                    else {
+                        let lhs = BigInt::from_unsigned(self as u128);
+                        lhs % rhs
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_rem_bigint_for_int!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 
 fn cmp_least_sig_vec(a: &Vec<u32>, b: &Vec<u32>) -> std::cmp::Ordering {
     let mut len_a = a.len();
@@ -761,10 +1148,6 @@ fn karatsuba_mul(a: &[u32], b: &[u32]) -> Vec<u32> {
 // TODO: Schönhage–Strassen
 // TODO: Fürer
 
-fn div_least_sig_vec(a: &[u32], b: &[u32]) -> (Vec<u32>, Vec<u32>) {
-    todo!()
-}
-
 fn shift_left(digits: &[u32], positions: usize) -> Vec<u32> {
     let mut result = vec![0u32; positions];
     result.extend_from_slice(digits);
@@ -839,6 +1222,33 @@ fn shr_digits(digits: &[u32], shift: u32) -> Vec<u32> {
 
     result.reverse();
     result
+}
+
+fn leading_digits(a: &BigInt, b: &BigInt) -> (u128, u128) {
+    let base = DIGIT_BASE as u128;
+    let n = b.digits_b10.len();
+
+    let get = |x: &Vec<u32>, idx: usize| -> u128 {
+        if idx >= x.len() { 0 } else { x[idx] as u128 }
+    };
+
+    // top two limbs of each operand
+    let ah = get(&a.digits_b10, n) * base + get(&a.digits_b10, n - 1);
+    let bh = get(&b.digits_b10, n - 1) * base + get(&b.digits_b10, n - 2);
+    (ah, bh)
+}
+
+fn gcd_small(a: BigInt, b: BigInt) -> BigInt {
+    let mut x = a.digits_b10[0] as u64;
+    let mut y = b.digits_b10[0] as u64;
+
+    while y != 0 {
+        let temp = x % y;
+        x = y;
+        y = temp;
+    }
+
+    BigInt::from_b10(true, vec![x as u32])
 }
 
 
@@ -923,6 +1333,14 @@ mod tests {
         let exponent = BigInt::parse("10").unwrap();
         let result = base.pow(exponent).unwrap();
         assert_eq!(format!("{}", result), "1024");
+    }
+
+    #[test]
+    fn test_big_int_gcd() {
+        let num1 = BigInt::parse("48").unwrap();
+        let num2 = BigInt::parse("18").unwrap();
+        let gcd = num1.gcd(&num2);
+        assert_eq!(format!("{}", gcd), "6");
     }
 
     // TODO: Implement bitwise operators
