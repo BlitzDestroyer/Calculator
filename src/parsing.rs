@@ -13,6 +13,13 @@ impl Program {
     }
 }
 
+impl std::fmt::Display for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let body_str: Vec<String> = self.body.iter().map(|node| format!("{}", node)).collect();
+        write!(f, "{}", body_str.join("\n"))
+    }
+}
+
 #[derive(Debug)]
 pub enum AstNode {
     Atom(Atom),
