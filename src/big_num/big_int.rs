@@ -387,15 +387,16 @@ impl BigInt {
     }
 
     pub fn pow(self, exp: BigInt) -> Result<BigInt, BigIntComputeError> {
+        if exp.is_zero() {
+            return Ok(BigInt::one());
+        }
+
         if exp.is_negative() {
             return Err(BigIntComputeError::NegativeExponent);
         }
 
         let mut result = BigInt::one();
         let mut exp = exp;
-        if exp.is_zero() {
-            return Ok(result);
-        }
 
         let mut base = self;
         while !exp.is_zero() {
@@ -612,6 +613,17 @@ impl std::fmt::Display for BigInt {
 impl From<&str> for BigInt {
     fn from(value: &str) -> Self {
         BigInt::parse(value).unwrap()
+    }
+}
+
+impl<T: Int> From<T> for BigInt {
+    fn from(value: T) -> Self {
+        if T::min_value() < T::zero() {
+            BigInt::from_signed(value.to_i128().unwrap())
+        }
+        else {
+            BigInt::from_unsigned(value.to_u128().unwrap())
+        }
     }
 }
 
