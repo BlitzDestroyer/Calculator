@@ -41,6 +41,34 @@ impl BigRational {
             )
         }
     }
+
+    pub(in crate::big_num) fn add_numerator(self, other: BigInt) -> BigRational {
+        BigRational::new(
+            self.numerator + other,
+            self.denominator,
+        ).normalize()
+    }
+
+    pub(in crate::big_num) fn sub_numerator(self, other: BigInt) -> BigRational {
+        BigRational::new(
+            self.numerator - other,
+            self.denominator,
+        ).normalize()
+    }
+
+    pub(in crate::big_num) fn add_denominator(self, other: BigInt) -> BigRational {
+        BigRational::new(
+            self.numerator,
+            self.denominator + other,
+        ).normalize()
+    }
+
+    pub(in crate::big_num) fn sub_denominator(self, other: BigInt) -> BigRational {
+        BigRational::new(
+            self.numerator,
+            self.denominator - other,
+        ).normalize()
+    }
 }
 
 impl std::fmt::Display for BigRational {
@@ -194,6 +222,30 @@ fn pi(iterations: u64) -> BigRational {
     pi_inv.reciprocal().normalize()
 }
 
+fn pi2(iteration: u64) -> BigRational {
+    let c = BigInt::from_unsigned(640320u64);
+    let mut sum = None;
+    for k in 0..iteration {
+        let sign = if k % 2 == 0 { BigInt::one() } else { -BigInt::one() };
+
+        let num = factorial(6 * k)
+            * BigInt::from_signed(13591409i64 + 545140134i64 * k as i64)
+            * sign;
+
+        let den = factorial(3 * k)
+            * factorial(k).pow(3.into()).unwrap()
+            * c.clone().pow(BigInt::from_unsigned(3 * k)).unwrap();
+
+        let term = BigRational::new(num, den);
+        sum = match sum {
+            Some(s) => Some(s + term),
+            None => Some(term),
+        };
+    }
+
+    sum.unwrap_or_else(|| BigRational::new(BigInt::zero(), BigInt::one()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_pi_approximation() {
-        let pi_approx = pi(10); // 10 iterations
+        let pi_approx = pi2(10); // 10 iterations
         let pi_str = format!("{:.20}", pi_approx);
         let pi_actual = "3.14159265358979323846"; // 20 digits of actual Pi
         // Compare first 20 digits

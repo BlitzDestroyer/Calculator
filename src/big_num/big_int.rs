@@ -7,12 +7,27 @@ const DIGIT_BASE: u32 = 1_000_000_000;
 const DIGIT_U64_MAX: u64 = 999_999_999_999_999_99;
 const DIGIT_U64_BASE: u64 = 1_000_000_000_000_000_00;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ParseLocation {
+    Base,
+    Decimal,
+    Exponent
+}
+
 #[derive(Debug, Error)]
 pub enum BigIntParseError {
+    #[error("BigInt computation error: {0}")]
+    ComputeError(#[from] BigIntComputeError),
     #[error("Invalid character in input string")]
     InvalidCharacter(char),
     #[error("Empty input string")]
     EmptyInput,
+    #[error("Integer cannot have decimal part")]
+    DecimalPart,
+    #[error("Integer part is missing")]
+    MissingIntegerPart,
+    #[error("Exponent not larger than or equal to decimal places")]
+    ExponentTooSmall,
 }
 
 #[derive(Debug, Error)]
@@ -103,71 +118,106 @@ impl BigInt {
         let (sign, mut buf) = match first_char {
             Some('+') => (true, String::new()),
             Some('-') => (false, String::new()),
-            Some(c) if c.is_digit(10) => (true, first_char.unwrap().to_string()),
+            Some(c) if c.is_digit(10) => (true, c.to_string()),
             Some(c) => return Err(BigIntParseError::InvalidCharacter(c)),
             None => return Err(BigIntParseError::EmptyInput),
         };
 
         let mut digits = Vec::new();
         let mut exp_digits = Vec::new();
+        let mut decimal_buf = String::new();
         let mut exp_buf = String::new();
-        let mut in_exponent = false;
+        let mut exponent_sign = true;
+        let mut parse_loc = ParseLocation::Base;
         for c in chars {
             match c {
                 '_' => continue, // underscores are allowed as digit separators
-                'e' | 'E' => {
-                    if in_exponent {
+                '.' => {
+                    if parse_loc != ParseLocation::Base {
                         return Err(BigIntParseError::InvalidCharacter(c));
                     }
 
-                    in_exponent = true;
+                    parse_loc = ParseLocation::Decimal;
+                },
+                'e' | 'E' => {
+                    if parse_loc == ParseLocation::Exponent {
+                        return Err(BigIntParseError::InvalidCharacter(c));
+                    }
+
+                    parse_loc = ParseLocation::Exponent;
                 },
                 c if c.is_digit(10) => {
-                    if in_exponent {
-                        exp_buf.push(c);
+                    match parse_loc {
+                        ParseLocation::Base => buf.push(c),
+                        ParseLocation::Decimal => decimal_buf.push(c),
+                        ParseLocation::Exponent => exp_buf.push(c),
                     }
-                    else {
-                        buf.push(c)
+                },
+                '+' => {
+                    if parse_loc != ParseLocation::Exponent || !exp_buf.is_empty() {
+                        return Err(BigIntParseError::InvalidCharacter(c));
                     }
+
+                    exponent_sign = true;
+                },
+                '-' => {
+                    if parse_loc != ParseLocation::Exponent || !exp_buf.is_empty() {
+                        return Err(BigIntParseError::InvalidCharacter(c));
+                    }
+
+                    exponent_sign = false;
                 },
                 _ => return Err(BigIntParseError::InvalidCharacter(c)),
             }
         }
 
-
-        let chunks = reverse_chunk_chars(&buf, 9);
-        for chunk in chunks {
-            let digit = chunk.parse::<u64>().unwrap();
-            debug_println!("Parsed chunk: {}, digit: {}", chunk, digit);
-            let (high, low) = split_u64(digit);
-            if high > 0 {
-                digits.push(high);
-            }
-
-            digits.push(low);
-        }
-
-        if !exp_buf.is_empty() {
-            let chunks = reverse_chunk_chars(&exp_buf, 9);
-            for chunk in chunks {
-                let digit = chunk.parse::<u64>().unwrap();
-                debug_println!("Parsed chunk: {}, exp digit: {}", chunk, digit);
-                let (high, low) = split_u64(digit);
-                if high > 0 {
-                    exp_digits.push(high);
+        debug_println!("Parsed BigInt: sign={}, buf='{}', decimal_buf='{}', exp_buf='{}', exponent_sign={}", sign, buf, decimal_buf, exp_buf, exponent_sign);
+        debug_println!("buf.len()={}, decimal_buf.len()={}, exp_buf.len()={}", buf.len(), decimal_buf.len(), exp_buf.len());
+        match (!buf.is_empty(), !decimal_buf.is_empty(), !exp_buf.is_empty()) {
+            (true, true, true) => {
+                parse_chunks(&exp_buf, &mut exp_digits);
+                let exp = Self::from_b10(exponent_sign, exp_digits);
+                let exp = exp - decimal_buf.len();
+                println!("BigInt: {:?}", exp);
+                if exp.is_negative() {
+                    return Err(BigIntParseError::ExponentTooSmall);
                 }
 
-                exp_digits.push(low);
-            }
-        }
+                buf.push_str(&decimal_buf);
+                parse_chunks(&buf, &mut digits);
+                let mut base = Self::from_b10(sign, digits);
+                let ten = Self::from_b10(true, vec![10]);
+                let pow_ten = ten.pow(exp)?;
+                base = base.inner_mul(&pow_ten);
 
-        Ok(Self::from_b10(sign, digits))
+                Ok(base)
+            },
+            (true, true, false) => Err(BigIntParseError::DecimalPart),
+            (true, false, true) => {
+                parse_chunks(&buf, &mut digits);
+                let mut base = Self::from_b10(sign, digits);
+                parse_chunks(&exp_buf, &mut exp_digits);
+                let exp = Self::from_b10(exponent_sign, exp_digits);
+                let ten = Self::from_b10(true, vec![10]);
+                let pow_ten = ten.pow(exp)?;
+                base = base.inner_mul(&pow_ten);
+
+                Ok(base)
+            },
+            (true, false, false) => {
+                parse_chunks(&buf, &mut digits);
+                let base = Self::from_b10(sign, digits);
+
+                Ok(base)
+            },
+            _ => Err(BigIntParseError::MissingIntegerPart),
+        }
     }
 
     pub fn is_zero(&self) -> bool {
         self.digits_b10.is_empty() || match self.dirty {
-            DigitsDirty::None | DigitsDirty::B10 => self.digits_b2[0] == 0,
-            DigitsDirty::B2 => self.digits_b10[0] == 0,
+            DigitsDirty::None | DigitsDirty::B10 => self.digits_b2.len() == 1 && self.digits_b2[0] == 0,
+            DigitsDirty::B2 => self.digits_b10.len() == 1 && self.digits_b10[0] == 0,
         }
     }
 
@@ -175,9 +225,8 @@ impl BigInt {
         self.sign && !self.is_zero()
     }
 
-    #[inline]
     pub fn is_negative(&self) -> bool {
-        !self.is_positive()
+        !self.sign && !self.is_zero()
     }
 
     pub fn is_even(&self) -> bool {
@@ -557,6 +606,7 @@ impl std::fmt::Display for BigInt {
             write!(f, "-")?;
         }
 
+        debug_println!("BigInt fmt: digits_b10={:?}", self.digits_b10);
         if f.alternate() {
             let mut len = self.digits_b10.len();
             let mut digits = self.digits_b10.iter().peekable();
@@ -1263,6 +1313,20 @@ fn gcd_small(a: BigInt, b: BigInt) -> BigInt {
     BigInt::from_b10(true, vec![x as u32])
 }
 
+fn parse_chunks(buf: &str, digits: &mut Vec<u32>) {
+    let chunks = reverse_chunk_chars(buf, 9);
+    for chunk in chunks {
+        let digit = chunk.parse::<u64>().unwrap();
+        debug_println!("Parsed chunk: {}, digit: {}", chunk, digit);
+        let (high, low) = split_u64(digit);
+        if high > 0 {
+            digits.push(high);
+        }
+
+        digits.push(low);
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1274,6 +1338,62 @@ mod tests {
         assert_eq!(num.sign, false);
         assert_eq!(num.digits_b10, vec![234567890, 345678901, 12]);
     }
+
+    #[test]
+    fn test_big_int_parse_with_underscores() {
+        let num = BigInt::parse("12_345678901_234567890").unwrap();
+        assert_eq!(num.sign, true);
+        assert_eq!(num.digits_b10, vec![234567890, 345678901, 12]);
+    }
+
+    #[test]
+    fn test_big_int_parse_zero() {
+        let num = BigInt::parse("0").unwrap();
+        assert_eq!(num.sign, true);
+        assert_eq!(num.digits_b10, vec![0]);
+    }
+
+    #[test]
+    fn test_big_int_parse_negative() {
+        let num = BigInt::parse("-12345678901234567890").unwrap();
+        assert_eq!(num.sign, false);
+        assert_eq!(num.digits_b10, vec![234567890, 345678901, 12]);
+    }
+
+    #[test]
+    fn test_big_int_parse_positive() {
+        let num = BigInt::parse("12345678901234567890").unwrap();
+        assert_eq!(num.sign, true);
+        assert_eq!(num.digits_b10, vec![234567890, 345678901, 12]);
+    }
+
+    #[test]
+    fn test_big_int_parse_with_exponential() {
+        let num = BigInt::parse("1.2345678901234567890e19").unwrap();
+        assert_eq!(num.sign, true);
+        assert_eq!(num.digits_b10, vec![234567890, 345678901, 12]);
+    }
+
+    #[test]
+    fn test_big_int_parse_with_exponential_and_underscores() {
+        let num = BigInt::parse("1.234_567_890_123_456_789_0e19").unwrap();
+        assert_eq!(num.sign, true);
+        assert_eq!(num.digits_b10, vec![234567890, 345678901, 12]);
+    }
+
+    #[test]
+    fn test_big_int_parse_with_leading_zeros() {
+        let num = BigInt::parse("000012345678901234567890").unwrap();
+        assert_eq!(num.sign, true);
+        assert_eq!(num.digits_b10, vec![234567890, 345678901, 12]);
+    }
+
+    #[test]
+    fn test_big_int_parse_invalid() {
+        let num = BigInt::parse("12a345");
+        assert!(num.is_err());
+    }
+
 
     #[test]
     fn test_big_int_display() {

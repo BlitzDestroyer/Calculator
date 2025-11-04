@@ -7,11 +7,13 @@ mod sealed {
     impl Sealed for i32 {}
     impl Sealed for i64 {}
     impl Sealed for i128 {}
+    impl Sealed for isize {}
     impl Sealed for u8 {}
     impl Sealed for u16 {}
     impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for u128 {}
+    impl Sealed for usize {}
 }
 
 pub trait Int: sealed::Sealed + PrimInt + ToPrimitive {}
@@ -21,11 +23,13 @@ impl Int for i16 {}
 impl Int for i32 {}
 impl Int for i64 {}
 impl Int for i128 {}
+impl Int for isize {}
 impl Int for u8 {}
 impl Int for u16 {}
 impl Int for u32 {}
 impl Int for u64 {}
 impl Int for u128 {}
+impl Int for usize {}
 
 pub trait SignedInt: sealed::Sealed + PrimInt + Signed + ToPrimitive + WrappingNeg {}
 
@@ -34,6 +38,7 @@ impl SignedInt for i16 {}
 impl SignedInt for i32 {}
 impl SignedInt for i64 {}
 impl SignedInt for i128 {}
+impl SignedInt for isize {}
 
 pub trait UnsignedInt: sealed::Sealed + PrimInt + Unsigned + ToPrimitive {}
 
@@ -42,3 +47,4 @@ impl UnsignedInt for u16 {}
 impl UnsignedInt for u32 {}
 impl UnsignedInt for u64 {}
 impl UnsignedInt for u128 {}
+impl UnsignedInt for usize {}
