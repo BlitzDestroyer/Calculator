@@ -492,7 +492,7 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
     let atom = lhs.get_atom();
     let atom = match atom {
         Some(a) => a,
-        None => return Err(AstError::UnexpectedToken(current_token.clone(), line!())),
+        None => unreachable!(), // Since lhs is guaranteed to be an atom here
     };
 
     let mut lhs = match atom.kind() {
@@ -820,5 +820,13 @@ mod ast_test {
         let result = expr(input);
         let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(let x = 10)");
+    }
+
+    #[test]
+    fn test_parsing_13() {
+        let input = "((1 + 2) * -(3 + 4)) + 5 * 6 * 7";
+        let result = expr(input);
+        let ast = &result.unwrap().body[0];
+        assert_eq!(ast.to_string(), "(+ (* (+ 1 2) (- (+ 3 4))) (* (* 5 6) 7))");
     }
 }
