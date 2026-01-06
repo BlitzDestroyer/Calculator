@@ -129,7 +129,7 @@ pub fn lex<S: LexerSpec>(
 
             LexerAction::EmitStrTokenAndReset(static_str) => {
                 tokens.push(S::emit_token(
-                    state,
+                    S::initial_state(),
                     static_str,
                     (line, col),
                 )?.ok_or_else(|| LexicalTokenizeError::ExpectedTokenButFoundNone((line, col)))?);

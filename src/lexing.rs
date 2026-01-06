@@ -232,6 +232,7 @@ pub enum LexicalTokenType {
     PendingLessThanSign,
     PendingEqualSign,
     PendingExclamationMark,
+    PendingColon,
 }
 
 #[derive(Debug)]
@@ -436,7 +437,18 @@ impl LexerSpec for Lexer {
                 }
             }
             '!' => {
-                lex_simple_token(state, *escaped, c, pos, line!())
+                if *escaped {
+                    return LexerAction::Error(LexicalTokenizeError::UnknownEscapeSequence(c, pos, line!()));
+                }
+
+                match state {
+                    LexicalTokenType::PendingEqualSign => {
+                        LexerAction::EmitStrTokenAndReset(LexicalToken::ExclamationMarkEqualSign.get_static_literal().unwrap())
+                    }
+                    _ => {
+                        LexerAction::Transition(LexicalTokenType::PendingExclamationMark)
+                    }
+                }
             }
             '~' => {
                 lex_simple_token(state, *escaped, c, pos, line!())
@@ -494,6 +506,23 @@ impl LexerSpec for Lexer {
                         LexerAction::Transition(LexicalTokenType::PendingEqualSign)
                     }
                 }
+            }
+            ':' => {
+                if *escaped {
+                    return LexerAction::Error(LexicalTokenizeError::UnknownEscapeSequence(c, pos, line!()));
+                }
+
+                match state {
+                    LexicalTokenType::PendingColon => {
+                        LexerAction::EmitStrTokenAndReset(LexicalToken::ColonColon.get_static_literal().unwrap())
+                    }
+                    _ => {
+                        LexerAction::Transition(LexicalTokenType::PendingColon)
+                    }
+                }
+            }
+            ',' => {
+                lex_simple_token(state, *escaped, c, pos, line!())
             }
             '"' => {
                 match state {
@@ -643,37 +672,43 @@ impl LexerSpec for Lexer {
             },
             LexicalTokenType::PendingAmpersand => {
                 debug_println!("Emitting token for buffer '{}' with type PendingAmpersand at pos {:?}", buffer, pos);
-                let token = LexicalToken::from_static_literal(buffer).unwrap_or(LexicalToken::Ampersand);
+                let token = LexicalToken::Ampersand;
                 let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
                 Ok(Some(token))
             },
             LexicalTokenType::PendingPipe => {
                 debug_println!("Emitting token for buffer '{}' with type PendingPipe at pos {:?}", buffer, pos);
-                let token = LexicalToken::from_static_literal(buffer).unwrap_or(LexicalToken::Pipe);
+                let token = LexicalToken::Pipe;
                 let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
                 Ok(Some(token))
             },
             LexicalTokenType::PendingGreaterThanSign => {
                 debug_println!("Emitting token for buffer '{}' with type PendingGreaterThanSign at pos {:?}", buffer, pos);
-                let token = LexicalToken::from_static_literal(buffer).unwrap_or(LexicalToken::GreaterThanSign);
+                let token = LexicalToken::GreaterThanSign;
                 let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
                 Ok(Some(token))
             },
             LexicalTokenType::PendingLessThanSign => {
                 debug_println!("Emitting token for buffer '{}' with type PendingLessThanSign at pos {:?}", buffer, pos);
-                let token = LexicalToken::from_static_literal(buffer).unwrap_or(LexicalToken::LessThanSign);
+                let token = LexicalToken::LessThanSign;
                 let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
                 Ok(Some(token))
             },
             LexicalTokenType::PendingEqualSign => {
                 debug_println!("Emitting token for buffer '{}' with type PendingEqualSign at pos {:?}", buffer, pos);
-                let token = LexicalToken::from_static_literal(buffer).unwrap_or(LexicalToken::EqualSign);
+                let token = LexicalToken::EqualSign;
                 let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
                 Ok(Some(token))
             },
             LexicalTokenType::PendingExclamationMark => {
                 debug_println!("Emitting token for buffer '{}' with type PendingExclamationMark at pos {:?}", buffer, pos);
-                let token = LexicalToken::from_static_literal(buffer).unwrap_or(LexicalToken::ExclamationMark);
+                let token = LexicalToken::ExclamationMark;
+                let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
+                Ok(Some(token))
+            },
+            LexicalTokenType::PendingColon => {
+                debug_println!("Emitting token for buffer '{}' with type PendingColon at pos {:?}", buffer, pos);
+                let token = LexicalToken::Colon;
                 let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
                 Ok(Some(token))
             },
@@ -723,6 +758,66 @@ fn lex_simple_token(state: LexicalTokenType, escaped: bool, c: char, pos: (usize
 #[cfg(test)]
 mod lexical_test {
     use super::*;
+
+    #[test]
+    fn test_tokenization_token_dump() {
+        let input = "1 2.345 hello \"string literal\" true + - * / \\\\ ( ) [ ] { } % ^ & && ! | || ~ = > < == != <= >= >> << : :: ; , \n if else while for loop break continue let const";
+        let expected_tokens = vec![
+            LexicalToken::Integer(1),
+            LexicalToken::Float(2.345),
+            LexicalToken::Identifier("hello".to_string()),
+            LexicalToken::StringLiteral("string literal".to_string()),
+            LexicalToken::Boolean(true),
+            LexicalToken::Plus,
+            LexicalToken::Minus,
+            LexicalToken::Asterisk,
+            LexicalToken::SlashForward,
+            LexicalToken::SlashBackward,
+            LexicalToken::ParenthesisLeft,
+            LexicalToken::ParenthesisRight,
+            LexicalToken::BracketLeft,
+            LexicalToken::BracketRight,
+            LexicalToken::BraceLeft,
+            LexicalToken::BraceRight,
+            LexicalToken::PercentSign,
+            LexicalToken::Caret,
+            LexicalToken::Ampersand,
+            LexicalToken::AmpersandAmpersand,
+            LexicalToken::ExclamationMark,
+            LexicalToken::Pipe,
+            LexicalToken::PipePipe,
+            LexicalToken::Tilde,
+            LexicalToken::EqualSign,
+            LexicalToken::GreaterThanSign,
+            LexicalToken::LessThanSign,
+            LexicalToken::EqualEqualSign,
+            LexicalToken::ExclamationMarkEqualSign,
+            LexicalToken::LessThanEqualSign,
+            LexicalToken::GreaterThanEqualSign,
+            LexicalToken::GreaterThanGreaterThanSign,
+            LexicalToken::LessThanLessThanSign,
+            LexicalToken::Colon,
+            LexicalToken::ColonColon,
+            LexicalToken::Semicolon,
+            LexicalToken::Comma,
+            //LexicalToken::Newline,
+            LexicalToken::If,
+            LexicalToken::Else,
+            LexicalToken::While,
+            LexicalToken::For,
+            LexicalToken::Loop,
+            LexicalToken::Break,
+            LexicalToken::Continue,
+            LexicalToken::Let,
+            LexicalToken::Const,
+        ];
+
+        let tokens = engine::lex::<Lexer>(input).unwrap();
+        assert_eq!(tokens.len(), expected_tokens.len(), "Got {:#?}, expected {:#?}", tokens, expected_tokens);
+        for (i, expected_token) in expected_tokens.iter().enumerate() {
+            assert_eq!(&tokens[i].token, expected_token);
+        }
+    }
 
     #[test]
     fn test_tokenization_int() {
