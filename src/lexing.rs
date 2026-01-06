@@ -738,12 +738,6 @@ impl Lexer {
         let tokens = tokens.into_iter().map(|t| Some(t)).collect();
         Ok(Self { tokens, index: 0 })
     }
-
-    fn next(&mut self) -> Option<&LexicalTokenContext> {
-        let curr_index = self.index;
-        self.index += 1;
-        self.tokens.get(curr_index).unwrap().as_ref()
-    }
 }
 
 fn lex_simple_token(state: LexicalTokenType, escaped: bool, c: char, pos: (usize, usize), source_line: u32) -> LexerAction<LexicalTokenType> {

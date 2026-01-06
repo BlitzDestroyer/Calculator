@@ -182,6 +182,7 @@ impl Atom {
             LexicalToken::BracketRight => Some(Delimiter::BracketRight),
             LexicalToken::BraceLeft => Some(Delimiter::BraceLeft),
             LexicalToken::BraceRight => Some(Delimiter::BraceRight),
+            LexicalToken::Semicolon => Some(Delimiter::Semicolon),
             _ => None,
         };
 
@@ -390,7 +391,8 @@ pub enum Delimiter {
     BracketLeft,
     BracketRight,
     BraceLeft,
-    BraceRight
+    BraceRight,
+    Semicolon,
 }
 
 impl std::fmt::Display for Delimiter {
@@ -402,6 +404,7 @@ impl std::fmt::Display for Delimiter {
             Delimiter::BracketRight => write!(f, "]"),
             Delimiter::BraceLeft => write!(f, "{{"),
             Delimiter::BraceRight => write!(f, "}}"),
+            Delimiter::Semicolon => write!(f, ";"),
         }
     }
 }
@@ -454,8 +457,8 @@ impl Grammar for Calculator {
         AstError::UnexpectedToken(token.clone(), source_line)
     }
 
-    fn prefix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<u8, Self::Error> {
-        match ast.get_atom() {
+    fn prefix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<u8, Self::Error> {
+        match op.get_atom() {
             Some(Atom::Operator(operator)) => match operator {
                 Operator::Plus | Operator::Minus => Ok(23),
                 Operator::BitwiseNot | Operator::LogicalNot => Ok(23),
@@ -465,8 +468,8 @@ impl Grammar for Calculator {
         }
     }
 
-    fn infix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<Option<(u8, u8)>, Self::Error> {
-        match ast.get_atom() {
+    fn infix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<Option<(u8, u8)>, Self::Error> {
+        match op.get_atom() {
             Some(Atom::Operator(operator)) => match operator {
                 // TODO: Add assignment operator with lowest precedence
                 Operator::LogicalOr => Ok(Some((3, 4))),
@@ -487,8 +490,8 @@ impl Grammar for Calculator {
         }
     }
 
-    fn postfix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<Option<u8>, Self::Error> {
-        match ast.get_atom() {
+    fn postfix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<Option<u8>, Self::Error> {
+        match op.get_atom() {
             Some(Atom::Delimiter(delimiter)) => match delimiter {
                 Delimiter::BracketLeft => Ok(Some(25)),
                 _ => Ok(None),
@@ -789,5 +792,43 @@ mod ast_test {
         let result = expr(input);
         let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(+ (* (+ 1 2) (- (+ 3 4))) (* (* 5 6) 7))", "Ast: {:?}", ast);
+    }
+
+    #[test]
+    fn error_unmatched_paren() {
+        assert!(expr("(1 + 2").is_err());
+    }
+
+    #[test]
+    fn error_unexpected_else() {
+        assert!(expr("else { 1 }").is_err());
+    }
+
+    #[test]
+    fn error_missing_rhs() {
+        assert!(expr("1 +").is_err());
+    }
+
+    #[test]
+    fn error_let_without_identifier() {
+        assert!(expr("let = 3").is_err());
+    }
+
+    #[test]
+    fn left_associative_minus() {
+        let ast = expr("10 - 3 - 2").unwrap().body[0].to_string();
+        assert_eq!(ast, "(- (- 10 3) 2)");
+    }
+
+    #[test]
+    fn prefix_then_postfix() {
+        let ast = expr("-x[0]").unwrap().body[0].to_string();
+        assert_eq!(ast, "(- ([ x 0))");
+    }
+
+    #[test]
+    fn multiple_statements() {
+        let program = expr("let x = 1; let y = x + 2").unwrap();
+        assert_eq!(program.body.len(), 2);
     }
 }

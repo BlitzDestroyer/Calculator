@@ -29,11 +29,11 @@ pub trait Grammar {
     fn unexpected_end_of_file() -> Self::Error;
     fn unexpected_token(token: &Self::Token, source_line: u32) -> Self::Error;
 
-    fn prefix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<u8, Self::Error>;
-    fn infix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<Option<(u8, u8)>, Self::Error>;
-    fn postfix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<Option<u8>, Self::Error>;
+    fn prefix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<u8, Self::Error>;
+    fn infix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<Option<(u8, u8)>, Self::Error>;
+    fn postfix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<Option<u8>, Self::Error>;
 
-    fn led(lhs: Self::Ast, args: Vec<Self::Ast>) -> Result<Self::Ast, Self::Error>;
+    fn led(op: Self::Ast, args: Vec<Self::Ast>) -> Result<Self::Ast, Self::Error>;
 
     fn led_postfix<TS: TokenStream<Self::Token>>(
         ast: Self::Ast,
