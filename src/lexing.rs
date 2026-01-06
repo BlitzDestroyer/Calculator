@@ -1,6 +1,6 @@
 pub mod engine;
 
-use crate::{debug_println, lexing::engine::{LexerAction, LexerSpec, LexicalTokenizeError}};
+use crate::{debug_println, lexing::engine::{LexerAction, LexerSpec, LexicalTokenizeError, TokenStream}};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum LexicalToken {
@@ -237,7 +237,7 @@ pub enum LexicalTokenType {
 
 #[derive(Debug)]
 pub struct Lexer {
-    tokens: Vec<LexicalTokenContext>,
+    tokens: Vec<Option<LexicalTokenContext>>,
     index: usize,
 }
 
@@ -715,20 +715,34 @@ impl LexerSpec for Lexer {
     }
 }
 
+impl TokenStream<LexicalTokenContext> for Lexer {
+    fn next(&mut self) -> Option<LexicalTokenContext> {
+        if self.index < self.tokens.len() {
+            let token = self.tokens[self.index].take();
+            self.index += 1;
+            token
+        } 
+        else {
+            None
+        }
+    }
+
+    fn peek(&self) -> Option<&LexicalTokenContext> {
+        self.tokens.get(self.index).map(|t| t.as_ref()).flatten()
+    }
+}
+
 impl Lexer {
     pub fn new(input: &str) -> Result<Self, LexicalTokenizeError> {
         let tokens = engine::lex::<Self>(input)?;
+        let tokens = tokens.into_iter().map(|t| Some(t)).collect();
         Ok(Self { tokens, index: 0 })
     }
 
-    pub fn next(&mut self) -> Option<&LexicalTokenContext> {
+    fn next(&mut self) -> Option<&LexicalTokenContext> {
         let curr_index = self.index;
         self.index += 1;
-        self.tokens.get(curr_index)
-    }
-
-    pub fn peek(&self) -> Option<&LexicalTokenContext> {
-        self.tokens.get(self.index)
+        self.tokens.get(curr_index).unwrap().as_ref()
     }
 }
 

@@ -39,6 +39,11 @@ pub enum LexerAction<S> {
     Error(LexicalTokenizeError),
 }
 
+pub trait TokenStream<T> {
+    fn next(&mut self) -> Option<T>;
+    fn peek(&self) -> Option<&T>;
+}
+
 pub trait LexerSpec {
     type Token;
     type State: Copy + Eq + std::fmt::Debug;

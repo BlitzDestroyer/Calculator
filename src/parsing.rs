@@ -1,6 +1,6 @@
-use thiserror::Error;
+pub mod engine;
 
-use crate::lexing::{Lexer, LexicalToken, LexicalTokenContext, engine::LexicalTokenizeError};
+use crate::{debug_println, lexing::{Lexer, LexicalToken, LexicalTokenContext, engine::TokenStream}, parsing::engine::{AstError, Grammar}};
 
 #[derive(Debug)]
 pub struct Program {
@@ -50,21 +50,21 @@ impl AstNode {
         }
     }
 
-    fn is_atom(&self) -> bool {
-        matches!(self, AstNode::Atom(_))
-    }
+    // fn is_atom(&self) -> bool {
+    //     matches!(self, AstNode::Atom(_))
+    // }
 
-    fn is_assignment(&self) -> bool {
-        matches!(self, AstNode::Assignment { .. })
-    }
+    // fn is_assignment(&self) -> bool {
+    //     matches!(self, AstNode::Assignment { .. })
+    // }
 
-    fn is_expression(&self) -> bool {
-        matches!(self, AstNode::Expression { .. })
-    }
+    // fn is_expression(&self) -> bool {
+    //     matches!(self, AstNode::Expression { .. })
+    // }
 
-    fn is_condition(&self) -> bool {
-        matches!(self, AstNode::Condition { .. })
-    }
+    // fn is_condition(&self) -> bool {
+    //     matches!(self, AstNode::Condition { .. })
+    // }
 
     fn get_atom(&self) -> Option<&Atom> {
         if let AstNode::Atom(atom) = self {
@@ -75,14 +75,14 @@ impl AstNode {
         }
     }
 
-    fn get_condition(&self) -> Option<(&AstNode, &AstNode, &Option<Box<AstNode>>)> {
-        if let AstNode::Condition { test, consequent, alternate } = self {
-            Some((test, consequent, alternate))
-        } 
-        else {
-            None
-        }
-    }
+    // fn get_condition(&self) -> Option<(&AstNode, &AstNode, &Option<Box<AstNode>>)> {
+    //     if let AstNode::Condition { test, consequent, alternate } = self {
+    //         Some((test, consequent, alternate))
+    //     } 
+    //     else {
+    //         None
+    //     }
+    // }
 }
 
 impl std::fmt::Display for AstNode {
@@ -215,52 +215,52 @@ impl Atom {
         }
     }
 
-    fn is_value(&self) -> bool {
-        matches!(self, Atom::Value(_))
-    }
+    // fn is_value(&self) -> bool {
+    //     matches!(self, Atom::Value(_))
+    // }
 
-    fn is_operator(&self) -> bool {
-        matches!(self, Atom::Operator(_))
-    }
+    // fn is_operator(&self) -> bool {
+    //     matches!(self, Atom::Operator(_))
+    // }
 
-    fn is_identifier(&self) -> bool {
-        matches!(self, Atom::Identifier(_))
-    }
+    // fn is_identifier(&self) -> bool {
+    //     matches!(self, Atom::Identifier(_))
+    // }
 
-    fn is_delimiter(&self) -> bool {
-        matches!(self, Atom::Delimiter(_))
-    }
+    // fn is_delimiter(&self) -> bool {
+    //     matches!(self, Atom::Delimiter(_))
+    // }
 
-    fn is_keyword(&self) -> bool {
-        matches!(self, Atom::Keyword(_))
-    }
+    // fn is_keyword(&self) -> bool {
+    //     matches!(self, Atom::Keyword(_))
+    // }
 
-    fn get_value(&self) -> Option<&Value> {
-        if let Atom::Value(value) = self {
-            Some(value)
-        }
-        else {
-            None
-        }
-    }
+    // fn get_value(&self) -> Option<&Value> {
+    //     if let Atom::Value(value) = self {
+    //         Some(value)
+    //     }
+    //     else {
+    //         None
+    //     }
+    // }
 
-    fn get_operator(&self) -> Option<&Operator> {
-        if let Atom::Operator(operator) = self {
-            Some(operator)
-        }
-        else {
-            None
-        }
-    }
+    // fn get_operator(&self) -> Option<&Operator> {
+    //     if let Atom::Operator(operator) = self {
+    //         Some(operator)
+    //     }
+    //     else {
+    //         None
+    //     }
+    // }
 
-    fn get_identifier(&self) -> Option<&String> {
-        if let Atom::Identifier(name) = self {
-            Some(name)
-        }
-        else {
-            None
-        }
-    }
+    // fn get_identifier(&self) -> Option<&String> {
+    //     if let Atom::Identifier(name) = self {
+    //         Some(name)
+    //     }
+    //     else {
+    //         None
+    //     }
+    // }
 
     fn get_delimiter(&self) -> Option<&Delimiter> {
         if let Atom::Delimiter(delimiter) = self {
@@ -435,29 +435,230 @@ impl std::fmt::Display for Keyword {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum AstError {
-    #[error("Lexical tokenize error: {0}")]
-    LexicalTokenizeError(#[from] LexicalTokenizeError),
-    #[error("Unexpected token")]
-    UnexpectedToken(LexicalTokenContext, u32), // Added u32 to provide caller context
-    #[error("Expected operator")]
-    ExpectedOperator(LexicalTokenContext),
-    #[error("Unmatched parentheses")]
-    UnmatchedParentheses,
-    #[error("Unmatched brackets")]
-    UnmatchedBrackets,
-    #[error("Unmatched braces")]
-    UnmatchedBraces,
-    #[error("Unexpected end of file")]
-    UnexpectedEndOfFile,
+pub struct Calculator;
+
+impl Grammar for Calculator {
+    type Token = LexicalTokenContext;
+    type Ast = AstNode;
+    type Error = AstError;
+
+    fn atom(token: &Self::Token) -> Option<Self::Ast> {
+        AstNode::atom(token.get_token())
+    }
+
+    fn unexpected_end_of_file() -> Self::Error {
+        AstError::UnexpectedEndOfFile
+    }
+
+    fn unexpected_token(token: &Self::Token, source_line: u32) -> Self::Error {
+        AstError::UnexpectedToken(token.clone(), source_line)
+    }
+
+    fn prefix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<u8, Self::Error> {
+        match ast.get_atom() {
+            Some(Atom::Operator(operator)) => match operator {
+                Operator::Plus | Operator::Minus => Ok(23),
+                Operator::BitwiseNot | Operator::LogicalNot => Ok(23),
+                _ => Err(AstError::UnexpectedToken(token.clone(), line!())),
+            },
+            _ => Err(AstError::UnexpectedToken(token.clone(), line!())),
+        }
+    }
+
+    fn infix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<Option<(u8, u8)>, Self::Error> {
+        match ast.get_atom() {
+            Some(Atom::Operator(operator)) => match operator {
+                // TODO: Add assignment operator with lowest precedence
+                Operator::LogicalOr => Ok(Some((3, 4))),
+                Operator::LogicalAnd => Ok(Some((5, 6))),
+                Operator::BitwiseOr => Ok(Some((7, 8))),
+                Operator::BitwiseXor => Ok(Some((9, 10))),
+                Operator::BitwiseAnd => Ok(Some((11, 12))),
+                Operator::Equal | Operator::NotEqual => Ok(Some((13, 14))),
+                Operator::LessThan | Operator::LessThanOrEqual
+                | Operator::GreaterThan | Operator::GreaterThanOrEqual => Ok(Some((15, 16))),
+                Operator::LeftShift | Operator::RightShift => Ok(Some((17, 18))),
+                Operator::Plus | Operator::Minus => Ok(Some((19, 20))),
+                Operator::Multiply | Operator::Divide | Operator::Modulo => Ok(Some((21, 22))),
+                _ => Ok(None),
+            },
+            Some(Atom::Delimiter(_)) => Ok(None),
+            _ => Err(AstError::UnexpectedToken(token.clone(), line!())),
+        }
+    }
+
+    fn postfix_binding_power(ast: &Self::Ast, token: &Self::Token) -> Result<Option<u8>, Self::Error> {
+        match ast.get_atom() {
+            Some(Atom::Delimiter(delimiter)) => match delimiter {
+                Delimiter::BracketLeft => Ok(Some(25)),
+                _ => Ok(None),
+            },
+            Some(Atom::Operator(_)) => Ok(None),
+            _ => Err(AstError::UnexpectedToken(token.clone(), line!())),
+        }
+    }
+
+    fn led(lhs: Self::Ast, args: Vec<Self::Ast>) -> Result<Self::Ast, Self::Error> {
+        Ok(AstNode::Expression {
+            head: Box::new(lhs),
+            args: args.into_iter().map(Box::new).collect(),
+        })
+    }
+
+    fn led_postfix<TS: TokenStream<Self::Token>>(
+        ast: Self::Ast,
+        op: Self::Token,
+        lexer: &mut TS
+    ) -> Result<Self::Ast, Self::Error> {
+        if op.get_token() == &LexicalToken::BracketLeft {
+            //lexer.next(); // Consume the operator
+            let rhs = engine::parse::<Calculator, TS>(lexer, 0)?;
+            if lexer.next().as_ref().map(|t| t.get_token()) != Some(&LexicalToken::BracketRight) {
+                return Err(AstError::UnmatchedBrackets);
+            }
+
+            let op = AstNode::atom(op.get_token()).unwrap();
+            Ok(AstNode::Expression {
+                head: Box::new(op),
+                args: vec![Box::new(ast), Box::new(rhs)],
+            })
+        }
+        else{
+            //lexer.next(); // Consume the operator
+            let op = AstNode::atom(op.get_token()).unwrap();
+            Ok(AstNode::Expression {
+                head: Box::new(op),
+                args: vec![Box::new(ast)],
+            })
+        }
+    }
+
+    fn nud<TS: TokenStream<Self::Token>>(
+            head: Self::Ast,
+            head_token: Self::Token,
+            lexer: &mut TS
+        ) -> Result<Self::Ast, Self::Error> {
+        let atom = head.get_atom().ok_or(AstError::UnexpectedToken(head_token.clone(), line!()))?;
+        match atom.kind() {
+            AtomKind::Delimiter => {
+                let delimiter = atom.get_delimiter().unwrap();
+                match delimiter {
+                    Delimiter::ParenthesisLeft => {
+                        let lhs = engine::parse::<Calculator, TS>(lexer, 0)?;
+                        if lexer.next().as_ref().map(|t| t.get_token()) != Some(&LexicalToken::ParenthesisRight) {
+                            return Err(AstError::UnmatchedParentheses);
+                        }
+
+                        Ok(lhs)
+                    },
+                    _ => {
+                        return Err(AstError::UnexpectedToken(head_token.clone(), line!()));
+                    }
+                }
+            },
+            AtomKind::Operator => {
+                let r_bp = Self::prefix_binding_power(&head, &head_token)?;
+                let rhs = engine::parse::<Calculator, TS>(lexer, r_bp)?;
+                Ok(AstNode::Expression {
+                    head: Box::new(head),
+                    args: vec![Box::new(rhs)],
+                })
+            },
+            AtomKind::Keyword => {
+                let keyword = atom.get_keyword().unwrap();
+                match keyword {
+                    Keyword::If => {
+                        let test = engine::parse::<Calculator, TS>(lexer, 0)?;
+                        if lexer.next().as_ref().map(|t| t.get_token()) != Some(&LexicalToken::BraceLeft) {
+                            return Err(AstError::UnexpectedToken(head_token.clone(), line!()));
+                        }
+
+                        let consequent = engine::parse::<Calculator, TS>(lexer, 0)?;
+                        if lexer.next().as_ref().map(|t| t.get_token()) != Some(&LexicalToken::BraceRight) {
+                            return Err(AstError::UnmatchedBraces);
+                        }
+
+                        let next_token = lexer.peek();
+                        let alternative = if next_token.map(|t| t.get_token()) == Some(&LexicalToken::Else) {
+                            lexer.next(); // Consume 'else'
+                            let next_token = lexer.peek().map(|t| t.get_token());
+                        
+                            let else_if;
+                            if next_token == Some(&LexicalToken::BraceLeft)  {
+                                lexer.next(); // Consume '{'
+                                else_if = false;
+                            }
+                            else if next_token == Some(&LexicalToken::If) {
+                                // Don't consume 'if' here, let the recursive call handle it
+                                else_if = true;
+                            }
+                            else{
+                                return Err(AstError::UnexpectedToken(head_token.clone(), line!()));
+                            }
+
+                            let alt = engine::parse::<Calculator, TS>(lexer, 0)?;
+                            // Else if will share the closing brace (and parsing if already checks for matching braces)
+                            if lexer.next().as_ref().map(|t| t.get_token()) != Some(&LexicalToken::BraceRight) && !else_if {
+                                return Err(AstError::UnmatchedBraces);
+                            }
+
+                            Some(Box::new(alt))
+                        }
+                        else{
+                            None
+                        };
+
+                        Ok(AstNode::Condition {
+                            test: Box::new(test),
+                            consequent: Box::new(consequent),
+                            alternate: alternative,
+                        })
+                    }
+                    Keyword::Else => return Err(AstError::UnexpectedToken(head_token.clone(), line!())),
+                    Keyword::Let | Keyword::Const => {
+                        let constant = matches!(keyword, Keyword::Const);
+
+                        // Expect identifier
+                        let ident_token = lexer.next().ok_or(AstError::UnexpectedEndOfFile)?;
+                        let ident_ast = AstNode::atom(ident_token.get_token())
+                            .ok_or_else(|| AstError::UnexpectedToken(ident_token.clone(), line!()))?;
+
+                        match ident_ast.get_atom() {
+                            Some(Atom::Identifier(_)) => {}
+                            _ => {
+                                return Err(AstError::UnexpectedToken(ident_token.clone(), line!()));
+                            }
+                        }
+
+                        // Expect '='
+                        let eq_token = lexer.next().ok_or(AstError::UnexpectedEndOfFile)?;
+                        if eq_token.get_token() != &LexicalToken::EqualSign {
+                            return Err(AstError::UnexpectedToken(eq_token.clone(), line!()));
+                        }
+
+                        // Parse RHS expression
+                        let value = engine::parse::<Calculator, TS>(lexer, 0)?;
+
+                        Ok(AstNode::Assignment {
+                            target: Box::new(ident_ast),
+                            value: Box::new(value),
+                            constant,
+                        })
+                    }
+                    _ => return Err(AstError::UnexpectedEndOfFile), // Placeholder for future keyword handling
+                }
+            }
+            _ => Ok(head),
+        }
+    }
 }
 
 pub fn expr(input: &str) -> Result<Program, AstError> {
     let mut lexer = Lexer::new(input)?;
+    debug_println!("Lexer initialized");
     let mut statements = Vec::new();
     loop {
-        let statement = expr_bp(&mut lexer, 0)?;
+        let statement = engine::parse::<Calculator, Lexer>(&mut lexer, 0)?;
         statements.push(statement);
         let token = lexer.peek();
         let semicolon = token.map(|t| t.get_token());
@@ -479,246 +680,6 @@ pub fn expr(input: &str) -> Result<Program, AstError> {
     Ok(Program::new(statements))
 }
 
-fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Result<AstNode, AstError> {
-    let current_token = lexer.next();
-    let (lhs, current_token) = match current_token {
-        Some(token) => match AstNode::atom(token.get_token()) {
-            Some(node) => (node, token),
-            None => return Err(AstError::UnexpectedToken(token.clone(), line!())),
-        },
-        None => return Err(AstError::UnexpectedEndOfFile),
-    };
-
-    let atom = lhs.get_atom();
-    let atom = match atom {
-        Some(a) => a,
-        None => unreachable!(), // Since lhs is guaranteed to be an atom here
-    };
-
-    let mut lhs = match atom.kind() {
-        AtomKind::Delimiter => {
-            let delimiter = atom.get_delimiter().unwrap();
-            match delimiter {
-                Delimiter::ParenthesisLeft => {
-                    let lhs = expr_bp(lexer, 0)?;
-                    if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::ParenthesisRight) {
-                        return Err(AstError::UnmatchedParentheses);
-                    }
-
-                    lhs
-                },
-                _ => {
-                    return Err(AstError::UnexpectedToken(current_token.clone(), line!()));
-                }
-            }
-        },
-        AtomKind::Operator => {
-            let ((), r_bp) = prefix_binding_power(&lhs, &current_token)?;
-            let rhs = expr_bp(lexer, r_bp)?;
-            AstNode::Expression {
-                head: Box::new(lhs),
-                args: vec![Box::new(rhs)],
-            }
-        },
-        AtomKind::Keyword => {
-            let keyword = atom.get_keyword().unwrap();
-            let current_token = current_token.clone();
-            match keyword {
-                Keyword::If => {
-                    let test = expr_bp(lexer, 0)?;
-                    if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BraceLeft) {
-                        return Err(AstError::UnexpectedToken(current_token.clone(), line!()));
-                    }
-
-                    let consequent = expr_bp(lexer, 0)?;
-                    if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BraceRight) {
-                        return Err(AstError::UnmatchedBraces);
-                    }
-
-                    let next_token = lexer.peek();
-                    let alternative = if next_token.map(|t| t.get_token()) == Some(&LexicalToken::Else) {
-                        lexer.next(); // Consume 'else'
-                        let next_token = lexer.peek().map(|t| t.get_token());
-                        
-                        let else_if;
-                        if next_token == Some(&LexicalToken::BraceLeft)  {
-                            lexer.next(); // Consume '{'
-                            else_if = false;
-                        }
-                        else if next_token == Some(&LexicalToken::If) {
-                            // Don't consume 'if' here, let the recursive call handle it
-                            else_if = true;
-                        }
-                        else{
-                            return Err(AstError::UnexpectedToken(current_token.clone(), line!()));
-                        }
-
-                        let alt = expr_bp(lexer, 0)?;
-                        // Else if will share the closing brace (and parsing if already checks for matching braces)
-                        if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BraceRight) && !else_if {
-                            return Err(AstError::UnmatchedBraces);
-                        }
-
-                        Some(Box::new(alt))
-                    }
-                    else{
-                        None
-                    };
-
-                    AstNode::Condition {
-                        test: Box::new(test),
-                        consequent: Box::new(consequent),
-                        alternate: alternative,
-                    }
-                }
-                Keyword::Else => return Err(AstError::UnexpectedToken(current_token.clone(), line!())),
-                Keyword::Let => parse_assignment(lexer, false)?,
-                Keyword::Const => parse_assignment(lexer, true)?,
-                _ => return Err(AstError::UnexpectedEndOfFile), // Placeholder for future keyword handling
-            }
-        }
-        _ => lhs,
-    };
-
-    loop {
-        let current_token = lexer.peek();
-        let (op, current_token) = match current_token {
-            Some(token) => match AstNode::atom(token.get_token()) {
-                Some(node) if node.get_atom().map(|a| a.is_operator() || a.is_delimiter()).unwrap_or(false) => (node, token),
-                //Some(node) if node.get_atom().map(|a| a.is_delimiter()).unwrap_or(false) => break, // 
-                Some(_) => return Err(AstError::UnexpectedToken(token.clone(), line!())),
-                None => return Err(AstError::UnexpectedToken(token.clone(), line!())),
-            },
-            None => break, // End of input, break the loop and return lhs
-        };
-
-        if let Some((l_bp, ())) = postfix_binding_power(&op, current_token)? {
-            if l_bp < min_bp {
-                // If the left binding power is less than the minimum binding power, we stop parsing
-                break;
-            }
-
-            // Consumption of token must occur within the blocks to satisfy lifetime constraints between current_token and lexer
-            lhs =  if current_token.get_token() == &LexicalToken::BracketLeft {
-                lexer.next(); // Consume the operator
-                let rhs = expr_bp(lexer, 0)?;
-                if lexer.next().map(|t| t.get_token()) != Some(&LexicalToken::BracketRight) {
-                    return Err(AstError::UnmatchedBrackets);
-                }
-
-                AstNode::Expression {
-                    head: Box::new(op),
-                    args: vec![Box::new(lhs), Box::new(rhs)],
-                }
-            }
-            else{
-                lexer.next(); // Consume the operator
-                AstNode::Expression {
-                    head: Box::new(op),
-                    args: vec![Box::new(lhs)],
-                }
-            };
-
-            continue;
-        }
-
-        if let Some((l_bp, r_bp)) = infix_binding_power(&op, current_token)?{
-            if l_bp < min_bp {
-                // If the left binding power is less than the minimum binding power, we stop parsing
-                break;
-            }
-
-            lexer.next(); // Consume the operator
-            let rhs = expr_bp(lexer, r_bp)?;
-
-            lhs = AstNode::Expression {
-                head: Box::new(op),
-                args: vec![Box::new(lhs), Box::new(rhs)],
-            };
-
-            continue;
-        }
-
-        break;
-    }
-
-    Ok(lhs)
-}
-
-fn parse_assignment(lexer: &mut Lexer, constant: bool) -> Result<AstNode, AstError> {
-    let identifier_token = lexer.next();
-    let identifier_token = match identifier_token {
-        Some(token) => token,
-        None => return Err(AstError::UnexpectedEndOfFile),
-    };
-
-    let identifier = match AstNode::atom(identifier_token.get_token()) {
-        Some(node) => match node.get_atom() {
-            Some(atom) if atom.is_identifier() => node,
-            _ => return Err(AstError::UnexpectedToken(identifier_token.clone(), line!())),
-        },
-        None => return Err(AstError::UnexpectedToken(identifier_token.clone(), line!())),
-    };
-
-    let equal_token = lexer.next();
-    let equal_token = match equal_token {
-        Some(token) => token,
-        None => return Err(AstError::UnexpectedEndOfFile),
-    };
-
-    if equal_token.get_token() != &LexicalToken::EqualSign {
-        return Err(AstError::UnexpectedToken(equal_token.clone(), line!()));
-    }
-
-    let value = expr_bp(lexer, 0)?;
-
-    Ok(AstNode::Assignment { target: Box::new(identifier), value: Box::new(value), constant })
-}
-
-fn prefix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Result<((), u8), AstError> {
-    match op.get_atom() {
-        Some(Atom::Operator(operator)) => match operator {
-            Operator::Plus | Operator::Minus => Ok(((), 23)),
-            Operator::BitwiseNot | Operator::LogicalNot => Ok(((), 23)),
-            _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
-        },
-        _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
-    }
-}
-
-fn postfix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Result<Option<(u8, ())>, AstError> {
-    match op.get_atom() {
-        Some(Atom::Delimiter(delimiter)) => match delimiter {
-            Delimiter::BracketLeft => Ok(Some((25, ()))),
-            _ => Ok(None),
-        },
-        Some(Atom::Operator(_)) => Ok(None),
-        _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
-    }
-}
-
-fn infix_binding_power(op: &AstNode, current_token: &LexicalTokenContext) -> Result<Option<(u8, u8)>, AstError> {
-    match op.get_atom() {
-        Some(Atom::Operator(operator)) => match operator {
-            // TODO: Add assignment operator with lowest precedence
-            Operator::LogicalOr => Ok(Some((3, 4))),
-            Operator::LogicalAnd => Ok(Some((5, 6))),
-            Operator::BitwiseOr => Ok(Some((7, 8))),
-            Operator::BitwiseXor => Ok(Some((9, 10))),
-            Operator::BitwiseAnd => Ok(Some((11, 12))),
-            Operator::Equal | Operator::NotEqual => Ok(Some((13, 14))),
-            Operator::LessThan | Operator::LessThanOrEqual
-            | Operator::GreaterThan | Operator::GreaterThanOrEqual => Ok(Some((15, 16))),
-            Operator::LeftShift | Operator::RightShift => Ok(Some((17, 18))),
-            Operator::Plus | Operator::Minus => Ok(Some((19, 20))),
-            Operator::Multiply | Operator::Divide | Operator::Modulo => Ok(Some((21, 22))),
-            _ => Ok(None),
-        },
-        Some(Atom::Delimiter(_)) => Ok(None),
-        _ => Err(AstError::UnexpectedToken(current_token.clone(), line!())),
-    }
-}
-
 #[cfg(test)]
 mod ast_test {
     use super::*;
@@ -728,7 +689,7 @@ mod ast_test {
         let input = "1 + 2";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(+ 1 2)");
+        assert_eq!(ast.to_string(), "(+ 1 2)", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -736,7 +697,7 @@ mod ast_test {
         let input = "1 + 2 * 3";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(+ 1 (* 2 3))");
+        assert_eq!(ast.to_string(), "(+ 1 (* 2 3))", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -744,7 +705,7 @@ mod ast_test {
         let input = "--1 * 2";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(* (- (- 1)) 2)");
+        assert_eq!(ast.to_string(), "(* (- (- 1)) 2)", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -752,7 +713,7 @@ mod ast_test {
         let input = "(((0)))";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "0");
+        assert_eq!(ast.to_string(), "0", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -760,7 +721,7 @@ mod ast_test {
         let input = "x[0][1]";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "([ ([ x 0) 1)");
+        assert_eq!(ast.to_string(), "([ ([ x 0) 1)", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -768,7 +729,7 @@ mod ast_test {
         let input = "if (x < 10) { x + 1 } else { x + 2 }";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) } else { (+ x 2) })");
+        assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) } else { (+ x 2) })", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -776,7 +737,7 @@ mod ast_test {
         let input = "if (x < 10) { x + 1 }";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) })");
+        assert_eq!(ast.to_string(), "(if (< x 10) { (+ x 1) })", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -785,7 +746,7 @@ mod ast_test {
         let result = expr(input);
         let ast = &result.unwrap().body[0];
         // Else if and else { if } are parsed into the same structure
-        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })");
+        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -794,7 +755,7 @@ mod ast_test {
         let result = expr(input);
         let ast = &result.unwrap().body[0];
         // Else if and else { if } are parsed into the same structure
-        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })");
+        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (== x 1) { 2 } else { 3 }) })", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -803,7 +764,7 @@ mod ast_test {
         let result = expr(input);
         let ast = &result.unwrap().body[0];
         // Else if and else { if } are parsed into the same structure
-        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (&& (>= x 1) (<= x 10)) { 2 } else { 3 }) })");
+        assert_eq!(ast.to_string(), "(if (== x 0) { 1 } else { (if (&& (>= x 1) (<= x 10)) { 2 } else { 3 }) })", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -811,7 +772,7 @@ mod ast_test {
         let input = "if (x < 10 || x > 5) { x + 1 }";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(if (|| (< x 10) (> x 5)) { (+ x 1) })");
+        assert_eq!(ast.to_string(), "(if (|| (< x 10) (> x 5)) { (+ x 1) })", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -819,7 +780,7 @@ mod ast_test {
         let input = "let x = 10";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(let x = 10)");
+        assert_eq!(ast.to_string(), "(let x = 10)", "Ast: {:?}", ast);
     }
 
     #[test]
@@ -827,6 +788,6 @@ mod ast_test {
         let input = "((1 + 2) * -(3 + 4)) + 5 * 6 * 7";
         let result = expr(input);
         let ast = &result.unwrap().body[0];
-        assert_eq!(ast.to_string(), "(+ (* (+ 1 2) (- (+ 3 4))) (* (* 5 6) 7))");
+        assert_eq!(ast.to_string(), "(+ (* (+ 1 2) (- (+ 3 4))) (* (* 5 6) 7))", "Ast: {:?}", ast);
     }
 }
