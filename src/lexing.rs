@@ -548,15 +548,8 @@ impl LexerSpec for Lexer {
                     match state {
                         LexicalTokenType::StringLiteral => LexerAction::ContinueWithChar(state, '\n'),
                         _ => {
-                            // parse_buffer(&mut buffer, token_type, &mut tokens, line_num, char_pos)?;
-                            // token_type = LexicalTokenType::None;
-                            // let token_literal = LexicalToken::Newline.get_static_literal().unwrap().to_string();
-                            // let token = LexicalTokenContext::new(LexicalToken::Newline, token_literal, line_num, char_pos - buffer.len());
-                            // tokens.push(token);
-                            // char_pos = 0; // Gets incremented at the start of the loop
-                            // line_num += 1;
-                            // TODO: Fix this as newline should be '\n' char not "\\n" string
-                            todo!()
+                            // TODO: Maybe use a different error to better communicate that escape sequences are only valid in string literals
+                            LexerAction::Error(LexicalTokenizeError::UnknownEscapeSequence(c, pos, line!()))
                         },
                     }
                 }
@@ -746,8 +739,6 @@ fn lex_simple_token(state: LexicalTokenType, escaped: bool, c: char, pos: (usize
 
     match state {
         LexicalTokenType::None => {
-            // let token_literal = simple_token.get_static_literal().unwrap().to_string();
-            // let token = LexicalTokenContext::new(simple_token, token_literal, pos.0, pos.1);
             LexerAction::EmitBufferThenCharToken(LexicalTokenType::None, c)
         }
         LexicalTokenType::Int | LexicalTokenType::Hex | LexicalTokenType::Octal | LexicalTokenType::Binary | LexicalTokenType::Float | LexicalTokenType::Identifier => {
@@ -757,7 +748,16 @@ fn lex_simple_token(state: LexicalTokenType, escaped: bool, c: char, pos: (usize
             LexerAction::EmitBufferThenCharToken(LexicalTokenType::None, c)
         }
         LexicalTokenType::StringLiteral => LexerAction::Continue(state),
-        _ => todo!("Unhandled state in lex_simple_token"),
+        LexicalTokenType::PendingAmpersand
+        | LexicalTokenType::PendingPipe
+        | LexicalTokenType::PendingGreaterThanSign
+        | LexicalTokenType::PendingLessThanSign
+        | LexicalTokenType::PendingEqualSign
+        | LexicalTokenType::PendingExclamationMark
+        | LexicalTokenType::PendingColon => unreachable!(
+            "lex_simple_token called with pending operator state: {:?}",
+            state
+        ),
     }
 }
 
