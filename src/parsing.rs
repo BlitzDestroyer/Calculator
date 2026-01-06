@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::lexing::{Lexer, LexicalToken, LexicalTokenContext, LexicalTokenizeError};
+use crate::lexing::{Lexer, LexicalToken, LexicalTokenContext, engine::LexicalTokenizeError};
 
 #[derive(Debug)]
 pub struct Program {
