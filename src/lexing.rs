@@ -441,14 +441,7 @@ impl LexerSpec for Lexer {
                     return LexerAction::Error(LexicalTokenizeError::UnknownEscapeSequence(c, pos, line!()));
                 }
 
-                match state {
-                    LexicalTokenType::PendingEqualSign => {
-                        LexerAction::EmitStrTokenAndReset(LexicalToken::ExclamationMarkEqualSign.get_static_literal().unwrap())
-                    }
-                    _ => {
-                        LexerAction::Transition(LexicalTokenType::PendingExclamationMark)
-                    }
-                }
+                LexerAction::Transition(LexicalTokenType::PendingExclamationMark)
             }
             '~' => {
                 lex_simple_token(state, *escaped, c, pos, line!())
@@ -712,6 +705,19 @@ impl LexerSpec for Lexer {
                 let token = LexicalTokenContext::new_static(token, pos.0, pos.1 - buffer.len());
                 Ok(Some(token))
             },
+        }
+    }
+
+    fn finalize(
+        state: Self::State,
+        buffer: &str,
+        pos: (usize, usize),
+    ) -> Result<Option<Self::Token>, LexicalTokenizeError> {
+        match state {
+            LexicalTokenType::StringLiteral => {
+                Err(LexicalTokenizeError::UnterminatedStringLiteral)
+            }
+            _ => Self::emit_token(state, buffer, pos)
         }
     }
 }

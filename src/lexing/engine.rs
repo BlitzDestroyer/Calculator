@@ -58,6 +58,12 @@ pub trait LexerSpec {
         buffer: &str,
         pos: (usize, usize),
     ) -> Result<Option<Self::Token>, LexicalTokenizeError>;
+
+    fn finalize(
+        state: Self::State,
+        buffer: &str,
+        pos: (usize, usize),
+    ) -> Result<Option<Self::Token>, LexicalTokenizeError>;
 }
 
 pub fn lex<S: LexerSpec>(
