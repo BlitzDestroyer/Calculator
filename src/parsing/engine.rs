@@ -1,24 +1,4 @@
-use thiserror::Error;
-
-use crate::lexing::{LexicalTokenContext, engine::{LexicalTokenizeError, TokenStream}};
-
-#[derive(Debug, Error)]
-pub enum AstError {
-    #[error("Lexical tokenize error: {0}")]
-    LexicalTokenizeError(#[from] LexicalTokenizeError),
-    #[error("Unexpected token")]
-    UnexpectedToken(LexicalTokenContext, u32), // Added u32 to provide caller context
-    #[error("Expected operator")]
-    ExpectedOperator(LexicalTokenContext),
-    #[error("Unmatched parentheses")]
-    UnmatchedParentheses,
-    #[error("Unmatched brackets")]
-    UnmatchedBrackets,
-    #[error("Unmatched braces")]
-    UnmatchedBraces,
-    #[error("Unexpected end of file")]
-    UnexpectedEndOfFile,
-}
+use crate::lexing::engine::TokenStream;
 
 pub trait Grammar {
     type Token;
@@ -28,6 +8,10 @@ pub trait Grammar {
     fn atom(token: &Self::Token) -> Option<Self::Ast>;
     fn unexpected_end_of_file() -> Self::Error;
     fn unexpected_token(token: &Self::Token, source_line: u32) -> Self::Error;
+    fn invalid_assignment_arity() -> Self::Error;
+    fn invalid_assignment_target(ast: &Self::Ast) -> Self::Error;
+
+    fn is_assignable(ast: &Self::Ast) -> bool;
 
     fn prefix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<u8, Self::Error>;
     fn infix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<Option<(u8, u8)>, Self::Error>;

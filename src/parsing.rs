@@ -1,6 +1,8 @@
 pub mod engine;
 
-use crate::{debug_println, lexing::{Lexer, LexicalToken, LexicalTokenContext, engine::TokenStream}, parsing::engine::{AstError, Grammar}};
+use thiserror::Error;
+
+use crate::{debug_println, lexing::{Lexer, LexicalToken, LexicalTokenContext, engine::{LexicalTokenizeError, TokenStream}}, parsing::engine::Grammar};
 
 #[derive(Debug)]
 pub struct Program {
@@ -23,7 +25,8 @@ impl std::fmt::Display for Program {
 #[derive(Debug)]
 pub enum AstNode {
     Atom(Atom),
-    Assignment { target: Box<AstNode>, value: Box<AstNode>, constant: bool },
+    Declaration { target: Box<AstNode>, value: Box<AstNode>, constant: bool },
+    Assignment { target: Box<AstNode>, value: Box<AstNode> },
     Expression { head: Box<AstNode>, args: Vec<Box<AstNode>> },
     Condition { test: Box<AstNode>, consequent: Box<AstNode>, alternate: Option<Box<AstNode>> },
 }
@@ -89,7 +92,8 @@ impl std::fmt::Display for AstNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AstNode::Atom(atom) => write!(f, "{}", atom),
-            AstNode::Assignment { target, value, constant } => write!(f, "({} {} = {})", if *constant { "const" } else { "let" }, target, value),
+            AstNode::Declaration { target, value, constant } => write!(f, "({} {} = {})", if *constant { "const" } else { "let" }, target, value),
+            AstNode::Assignment { target, value } => write!(f, "({} = {})", target, value),
             AstNode::Expression { head, args } => {
                 let args_str: Vec<String> = args.iter().map(|arg| format!("{}", arg)).collect();
                 write!(f, "({} {})", head, args_str.join(" "))
@@ -159,6 +163,7 @@ impl Atom {
             LexicalToken::Tilde => Some(Operator::BitwiseNot),
             LexicalToken::LessThanLessThanSign => Some(Operator::LeftShift),
             LexicalToken::GreaterThanGreaterThanSign => Some(Operator::RightShift),
+            LexicalToken::EqualSign => Some(Operator::Assign),
             _ => None,
         };
 
@@ -355,6 +360,7 @@ pub enum Operator {
     LeftShift,
     RightShift,
     BitwiseNot,
+    Assign,
 }
 
 impl std::fmt::Display for Operator {
@@ -380,6 +386,7 @@ impl std::fmt::Display for Operator {
             Operator::LeftShift => write!(f, "<<"),
             Operator::RightShift => write!(f, ">>"),
             Operator::BitwiseNot => write!(f, "~"),
+            Operator::Assign => write!(f, "="),
         }
     }
 }
@@ -438,6 +445,28 @@ impl std::fmt::Display for Keyword {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum AstError {
+    #[error("Lexical tokenize error: {0}")]
+    LexicalTokenizeError(#[from] LexicalTokenizeError),
+    #[error("Unexpected token")]
+    UnexpectedToken(LexicalTokenContext, u32), // Added u32 to provide caller context
+    #[error("Expected operator")]
+    ExpectedOperator(LexicalTokenContext),
+    #[error("Unmatched parentheses")]
+    UnmatchedParentheses,
+    #[error("Unmatched brackets")]
+    UnmatchedBrackets,
+    #[error("Unmatched braces")]
+    UnmatchedBraces,
+    #[error("Unexpected end of file")]
+    UnexpectedEndOfFile,
+    #[error("Invalid assignment arity")]
+    InvalidAssignmentArity,
+    #[error("Invalid assignment target: {0}")]
+    InvalidAssignmentTarget(String),
+}
+
 pub struct Calculator;
 
 impl Grammar for Calculator {
@@ -457,6 +486,21 @@ impl Grammar for Calculator {
         AstError::UnexpectedToken(token.clone(), source_line)
     }
 
+    fn invalid_assignment_arity() -> Self::Error {
+        AstError::InvalidAssignmentArity
+    }
+
+    fn invalid_assignment_target(ast: &Self::Ast) -> Self::Error {
+        AstError::InvalidAssignmentTarget(format!("{}", ast))
+    }
+
+    fn is_assignable(ast: &Self::Ast) -> bool {
+        match ast {
+            AstNode::Atom(atom) => matches!(atom, Atom::Identifier(_)),
+            _ => false,
+        }
+    }
+
     fn prefix_binding_power(op: &Self::Ast, token: &Self::Token) -> Result<u8, Self::Error> {
         match op.get_atom() {
             Some(Atom::Operator(operator)) => match operator {
@@ -472,6 +516,7 @@ impl Grammar for Calculator {
         match op.get_atom() {
             Some(Atom::Operator(operator)) => match operator {
                 // TODO: Add assignment operator with lowest precedence
+                Operator::Assign => Ok(Some((1, 2))),
                 Operator::LogicalOr => Ok(Some((3, 4))),
                 Operator::LogicalAnd => Ok(Some((5, 6))),
                 Operator::BitwiseOr => Ok(Some((7, 8))),
@@ -502,10 +547,28 @@ impl Grammar for Calculator {
     }
 
     fn led(lhs: Self::Ast, args: Vec<Self::Ast>) -> Result<Self::Ast, Self::Error> {
-        Ok(AstNode::Expression {
-            head: Box::new(lhs),
-            args: args.into_iter().map(Box::new).collect(),
-        })
+        if let Some(Atom::Operator(Operator::Assign)) = lhs.get_atom() {
+            if args.len() != 2 {
+                return Err(Self::invalid_assignment_arity());
+            }
+
+            let mut args = args.into_iter();
+            let target = args.next().unwrap();
+            if !Self::is_assignable(&target) {
+                return Err(Self::invalid_assignment_target(&target));
+            }
+
+            let target = Box::new(target);
+            let value = Box::new(args.next().unwrap());
+
+            Ok(AstNode::Assignment { target, value })
+        }
+        else{
+            Ok(AstNode::Expression {
+                head: Box::new(lhs),
+                args: args.into_iter().map(Box::new).collect(),
+            })
+        }
     }
 
     fn led_postfix<TS: TokenStream<Self::Token>>(
@@ -642,7 +705,7 @@ impl Grammar for Calculator {
                         // Parse RHS expression
                         let value = engine::parse::<Calculator, TS>(lexer, 0)?;
 
-                        Ok(AstNode::Assignment {
+                        Ok(AstNode::Declaration {
                             target: Box::new(ident_ast),
                             value: Box::new(value),
                             constant,
@@ -792,6 +855,24 @@ mod ast_test {
         let result = expr(input);
         let ast = &result.unwrap().body[0];
         assert_eq!(ast.to_string(), "(+ (* (+ 1 2) (- (+ 3 4))) (* (* 5 6) 7))", "Ast: {:?}", ast);
+    }
+
+    #[test]
+    fn test_declaration_const() {
+        let ast = expr("const y = 42").unwrap().body[0].to_string();
+        assert_eq!(ast, "(const y = 42)");
+    }
+
+    #[test]
+    fn test_declaration_let() {
+        let ast = expr("let x = 10").unwrap().body[0].to_string();
+        assert_eq!(ast, "(let x = 10)");
+    }
+
+    #[test]
+    fn test_assignment() {
+        let ast = expr("x = 5").unwrap().body[0].to_string();
+        assert_eq!(ast, "(x = 5)");
     }
 
     #[test]

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::{lexing::LexicalTokenizeError, parsing::{AstError, AstNode, Atom, Operator, Value}};
+use crate::{lexing::engine::LexicalTokenizeError, parsing::{AstError, AstNode, Atom, Operator, Value}};
 
 #[derive(Debug, Error)]
 pub enum ComputationError {
@@ -103,9 +103,28 @@ fn get_ast_node_value(node: &AstNode, state: &mut ProgramState) -> Result<Value,
             let args = args.iter().map(|arg| get_ast_node_value(arg, state)).collect::<Result<Vec<_>, _>>()?;
             let op = get_ast_node_operator(head)?;
             compute_operation(op, args)
-        }
+        },
+        AstNode::Assignment { target, value } => {
+            let value = get_ast_node_value(value, state)?;
+            match target.as_ref() {
+                AstNode::Atom(Atom::Identifier(name)) => {
+                    for frame in state.frames.iter_mut().rev() {
+                        if frame.variables.contains_key(name) {
+                            let (_, is_constant) = frame.variables.get(name).unwrap();
+                            if *is_constant {
+                                return Err(ComputationError::CannotReassignToConstantVariable);
+                            }
+                            frame.variables.insert(name.clone(), (value.clone(), false));
+                            return Ok(value);
+                        }
+                    }
+                    return Err(ComputationError::VariableNotDefined);
+                }
+                _ => Err(ComputationError::ExpectedValueAtom),
+            }
+        },
         AstNode::Condition { test, consequent, alternate } => compute_condition(test, consequent, alternate, state),
-        AstNode::Assignment { target, value, constant } => {
+        AstNode::Declaration { target, value, constant } => {
             let value = get_ast_node_value(value, state)?;
             match target.as_ref() {
                 AstNode::Atom(Atom::Identifier(name)) => {
@@ -457,7 +476,8 @@ fn compute_operation(op: Operator, args: Vec<Value>) -> Result<Value, Computatio
             else {
                 Err(ComputationError::IncorrectNumberOfArguments)
             }
-        }
+        },
+        Operator::Assign => Err(ComputationError::NotImplemented),
     }
 }
 
@@ -510,6 +530,8 @@ fn print_ast_error(err: AstError) {
                             LexicalTokenizeError::InvalidOctalLiteral => println!("Invalid octal literal"),
                             LexicalTokenizeError::InvalidHexadecimalLiteral => println!("Invalid hexadecimal literal"),
                             LexicalTokenizeError::TokenTypeCannotBeNoneWhenBufferIsNotEmpty => println!("Token type cannot be None when buffer is not empty"),
+                            LexicalTokenizeError::ExpectedTokenButFoundNone((line, col)) => println!("Expected token, but found none at line {}, column {}", line, col),
+                            LexicalTokenizeError::Other(message) => println!("Lexical tokenization error: {}", message),
                         }
             },
         AstError::UnexpectedToken(lexical_token_context, _) => {
@@ -526,6 +548,8 @@ fn print_ast_error(err: AstError) {
         AstError::UnmatchedParentheses => println!("Unmatched parentheses"),
         AstError::UnmatchedBrackets => println!("Unmatched brackets"),
         AstError::UnmatchedBraces => println!("Unmatched braces"),
+        AstError::InvalidAssignmentArity => println!("Invalid assignment arity"),
+        AstError::InvalidAssignmentTarget(ast) => println!("Invalid assignment target: {}", ast),
     }
 }
 
